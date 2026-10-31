@@ -25,13 +25,21 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor — Xử lý lỗi 401 tập trung (token hết hạn)
+// Response Interceptor — Xử lý lỗi 401 tập trung (token hết hạn trên các trang được bảo vệ)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const isLoginRequest =
+      error.config?.url?.includes('/auth/login') ||
+      error.config?.url?.includes('/auth/google');
+
+    // Chỉ logout và reload nếu KHÔNG PHẢI là request đăng nhập
+    // (Tránh reload trang khi người dùng nhập sai mật khẩu để thông báo lỗi màu đỏ được giữ nguyên trên giao diện)
+    if (error.response?.status === 401 && !isLoginRequest) {
       useAuthStore.getState().logout();
-      window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

@@ -100,25 +100,13 @@ Frontend sẽ chạy tại: `http://localhost:5173`
 
 ---
 
-## 4. Kiểm tra kết nối Database
+## 4. Kiểm tra kết nối Database & Nạp tài khoản mẫu
 
 Sau khi cấu hình `.env` xong, chạy lệnh sau trong thư mục `backend` để xác nhận kết nối thành công:
 
 ```bash
 node test-db.js
 ```
-
-Kết quả thành công trông như thế này:
-
-```
-Đang kết nối tới: localhost:1433 | tên_database
-✅ Kết nối thành công!
-   Database: tên_database
-   Login as: sa
-   Server time: 2026-10-29T...
-```
-
----
 
 ## 5. Cấu trúc dự án
 

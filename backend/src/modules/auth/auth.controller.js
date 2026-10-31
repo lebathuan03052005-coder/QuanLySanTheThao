@@ -18,6 +18,16 @@ export async function login(req, res, next) {
   }
 }
 
+export async function googleLogin(req, res, next) {
+  try {
+    const { credential } = req.body;
+    const { token, user } = await authService.googleLogin(credential);
+    res.json({ success: true, token, data: user });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function logout(req, res, next) {
   try {
     res.json({ success: true, message: 'Đăng xuất thành công.' });
