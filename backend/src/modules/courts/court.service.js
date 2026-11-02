@@ -1,13 +1,17 @@
 import { getPool } from '../../core/config/db.js';
 
 /**
- * Lấy danh sách tất cả sân thể thao.
- * @param {{ sport?, area? }} filters
+ * Lấy danh sách tất cả sân thể thao theo schema bảng courts trong mục dulieu.
+ * @param {{ sport_id?, owner_id? }} filters
  */
 export async function getAllCourts(filters = {}) {
   const pool = await getPool();
-  const result = await pool.request()
-    .query('SELECT * FROM Courts ORDER BY CreatedAt DESC');
+  let query = 'SELECT * FROM courts WHERE status = \'ACTIVE\'';
+  if (filters.owner_id) {
+    query += ` AND owner_id = ${parseInt(filters.owner_id)}`;
+  }
+  query += ' ORDER BY court_id DESC';
+  const result = await pool.request().query(query);
   return result.recordset;
 }
 
@@ -19,27 +23,28 @@ export async function getCourtById(courtId) {
   const pool = await getPool();
   const result = await pool.request()
     .input('id', courtId)
-    .query('SELECT * FROM Courts WHERE Id = @id');
+    .query('SELECT * FROM courts WHERE court_id = @id');
   return result.recordset[0] || null;
 }
 
 /**
  * Tạo mới một sân thể thao.
- * @param {{ ownerId, name, address, sport, pricePerHour }} data
+ * @param {{ ownerId: number, courtName: string, address?: string, sportId?: number }} data
  */
 export async function createCourt(data) {
-  const { ownerId, name, address, sport, pricePerHour } = data;
+  const { ownerId, courtName, address, sportId = 1, description = '', utilities = '' } = data;
   const pool = await getPool();
   const result = await pool.request()
     .input('ownerId', ownerId)
-    .input('name', name)
+    .input('courtName', courtName)
     .input('address', address)
-    .input('sport', sport)
-    .input('pricePerHour', pricePerHour)
+    .input('sportId', sportId)
+    .input('description', description)
+    .input('utilities', utilities)
     .query(`
-      INSERT INTO Courts (OwnerId, Name, Address, Sport, PricePerHour, CreatedAt)
+      INSERT INTO courts (owner_id, sport_id, court_name, address, description, utilities, status)
       OUTPUT INSERTED.*
-      VALUES (@ownerId, @name, @address, @sport, @pricePerHour, GETDATE())
+      VALUES (@ownerId, @sportId, @courtName, @address, @description, @utilities, 'ACTIVE')
     `);
   return result.recordset[0];
 }
@@ -47,20 +52,25 @@ export async function createCourt(data) {
 /**
  * Cập nhật thông tin sân.
  * @param {number} courtId
- * @param {{ name?, address?, pricePerHour? }} data
+ * @param {{ courtName?, address?, description?, utilities? }} data
  */
 export async function updateCourt(courtId, data) {
-  const { name, address, pricePerHour } = data;
+  const { courtName, address, description, utilities } = data;
   const pool = await getPool();
   const result = await pool.request()
     .input('id', courtId)
-    .input('name', name)
+    .input('courtName', courtName)
     .input('address', address)
-    .input('pricePerHour', pricePerHour)
+    .input('description', description)
+    .input('utilities', utilities)
     .query(`
-      UPDATE Courts SET Name = @name, Address = @address, PricePerHour = @pricePerHour
+      UPDATE courts 
+      SET court_name = COALESCE(@courtName, court_name),
+          address = COALESCE(@address, address),
+          description = COALESCE(@description, description),
+          utilities = COALESCE(@utilities, utilities)
       OUTPUT INSERTED.*
-      WHERE Id = @id
+      WHERE court_id = @id
     `);
   return result.recordset[0];
 }
@@ -73,5 +83,5 @@ export async function deleteCourt(courtId) {
   const pool = await getPool();
   await pool.request()
     .input('id', courtId)
-    .query('DELETE FROM Courts WHERE Id = @id');
+    .query('DELETE FROM courts WHERE court_id = @id');
 }

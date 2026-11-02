@@ -1,4 +1,5 @@
 import api from '../../shared/lib/axios';
+import type { UserRole } from '../../shared/stores/authStore';
 
 export interface LoginPayload {
   email: string;
@@ -7,12 +8,35 @@ export interface LoginPayload {
 
 export interface RegisterPayload extends LoginPayload {
   fullName: string;
-  role?: 'player' | 'owner';
+  role?: UserRole;
 }
 
-export async function login(payload: LoginPayload) {
-  const res = await api.post('/auth/login', payload);
-  return res.data; // { token, data: user }
+export interface RawUserData {
+  id?: number;
+  Id?: number;
+  fullName?: string;
+  FullName?: string;
+  email?: string;
+  Email?: string;
+  role?: UserRole;
+  Role?: UserRole;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  token: string;
+  data: RawUserData;
+  message?: string;
+}
+
+export async function login(payload: LoginPayload): Promise<LoginResponse> {
+  const res = await api.post<LoginResponse>('/auth/login', payload);
+  return res.data;
+}
+
+export async function loginWithGoogle(credential: string): Promise<LoginResponse> {
+  const res = await api.post<LoginResponse>('/auth/google', { credential });
+  return res.data;
 }
 
 export async function register(payload: RegisterPayload) {

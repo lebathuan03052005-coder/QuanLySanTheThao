@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { verifyToken } from '../../core/middlewares/auth.js';
+import { verifyToken, checkBookingOwnership } from '../../core/middlewares/auth.js';
 import {
   getBookings,
   getBookingById,
@@ -10,10 +10,13 @@ import {
 
 const router = Router();
 
+// Tất cả API đặt sân đều được bảo vệ bởi middleware xác thực JWT
 router.get('/', verifyToken, getBookings);
-router.get('/:id', verifyToken, getBookingById);
+router.get('/:id', verifyToken, checkBookingOwnership, getBookingById);
 router.post('/', verifyToken, createBooking);
-router.put('/:id', verifyToken, updateBooking);
-router.delete('/:id', verifyToken, deleteBooking);
+
+// Cập nhật và Hủy đặt sân: Kiểm tra quyền sở hữu (chỉ chính người đặt hoặc chủ sân/admin)
+router.put('/:id', verifyToken, checkBookingOwnership, updateBooking);
+router.delete('/:id', verifyToken, checkBookingOwnership, deleteBooking);
 
 export default router;
