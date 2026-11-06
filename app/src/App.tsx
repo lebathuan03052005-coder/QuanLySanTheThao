@@ -1,9 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
-import LoginPage from './features/auth/LoginPage';
-import PlayerLayout from './shared/layouts/PlayerLayout';
-import OwnerLayout from './shared/layouts/OwnerLayout';
-import MatchListPage from './features/matches/MatchListPage';
-import { useAuthStore } from './shared/stores/authStore';
+import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import LoginPage from "./features/auth/LoginPage";
+import PlayerLayout from "./shared/layouts/PlayerLayout";
+import OwnerLayout from "./shared/layouts/OwnerLayout";
+import MatchListPage from "./features/matches/MatchListPage";
+import StaffManagementPage from "./features/staff/StaffManagementPage";
+import { useAuthStore } from "./shared/stores/authStore";
 
 function AdminPlaceholder() {
   const { user, logout } = useAuthStore();
@@ -15,7 +16,9 @@ function AdminPlaceholder() {
             <span className="inline-block px-2.5 py-1 text-xs font-semibold bg-purple-100 text-purple-700 rounded-full mb-1">
               Quản trị viên
             </span>
-            <h1 className="text-2xl font-bold text-gray-800">Khu vực Quản trị Hệ thống (Admin)</h1>
+            <h1 className="text-2xl font-bold text-gray-800">
+              Khu vực Quản trị Hệ thống (Admin)
+            </h1>
           </div>
           <button
             onClick={logout}
@@ -42,7 +45,9 @@ function StaffPlaceholder() {
             <span className="inline-block px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-700 rounded-full mb-1">
               Nhân viên
             </span>
-            <h1 className="text-2xl font-bold text-gray-800">Khu vực Nhân viên Vận hành (Staff)</h1>
+            <h1 className="text-2xl font-bold text-gray-800">
+              Khu vực Nhân viên Vận hành (Staff)
+            </h1>
           </div>
           <button
             onClick={logout}
@@ -69,16 +74,89 @@ export default function App() {
         <Route path="/" element={<PlayerLayout />}>
           <Route index element={<MatchListPage />} />
           <Route path="matches" element={<MatchListPage />} />
-          <Route path="courts" element={<div className="p-4 text-gray-600">Khu vực danh sách sân</div>} />
-          <Route path="bookings" element={<div className="p-4 text-gray-600">Khu vực lịch đặt sân</div>} />
+          <Route
+            path="courts"
+            element={
+              <div className="p-4 text-gray-600">Khu vực danh sách sân</div>
+            }
+          />
+          <Route
+            path="bookings"
+            element={
+              <div className="p-4 text-gray-600">Khu vực lịch đặt sân</div>
+            }
+          />
         </Route>
 
-        {/* Route dành cho Owner / Chủ sân */}
+        {/* Route dành cho Owner / Chủ sân (Khớp với các mục trên Sidebar) */}
         <Route path="/owner" element={<OwnerLayout />}>
-          <Route index element={<Navigate to="/owner/courts" replace />} />
-          <Route path="courts" element={<div className="p-4 text-gray-600">Quản lý sân bóng (Owner)</div>} />
-          <Route path="bookings" element={<div className="p-4 text-gray-600">Quản lý lịch đặt sân (Owner)</div>} />
-          <Route path="revenue" element={<div className="p-4 text-gray-600">Báo cáo doanh thu (Owner)</div>} />
+          <Route index element={<Navigate to="/owner/analytics" replace />} />
+          <Route
+            path="analytics"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Bảng thống kê Analytics (Owner)
+              </div>
+            }
+          />
+          <Route
+            path="bookings"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Quản lý lịch đặt sân (Owner)
+              </div>
+            }
+          />
+          <Route
+            path="revenue"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Báo cáo doanh thu & Billing (Owner)
+              </div>
+            }
+          />
+          <Route
+            path="courts"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Quản lý sân bóng (Owner)
+              </div>
+            }
+          />
+          <Route path="staff" element={<StaffManagementPage />} />
+          <Route path="players" element={<StaffManagementPage />} />
+          <Route
+            path="tournaments"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Giải đấu & Tournaments (Owner)
+              </div>
+            }
+          />
+          <Route
+            path="coaches"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Huấn luyện viên & Coaches (Owner)
+              </div>
+            }
+          />
+          <Route
+            path="settings"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Cài đặt cụm sân (Owner)
+              </div>
+            }
+          />
+          <Route
+            path="support"
+            element={
+              <div className="p-4 text-gray-700 font-medium">
+                Trung tâm hỗ trợ (Owner)
+              </div>
+            }
+          />
         </Route>
 
         {/* Route dành cho Admin & Staff */}

@@ -58,6 +58,7 @@ export async function register(data) {
     phone: created.phone,
     email: created.email,
     role: created.role.toLowerCase(),
+    avatarUrl: null,
     createdAt: created.created_at,
   };
 }
@@ -84,7 +85,7 @@ export async function login(data) {
   const result = await pool.request()
     .input('identifier', cleanInput)
     .query(`
-      SELECT user_id, full_name, phone, email, password_hash, role, created_at
+      SELECT user_id, full_name, phone, email, password_hash, role, avatar_url, status, created_at
       FROM users
       WHERE LOWER(email) = LOWER(@identifier) OR phone = @identifier
     `);
@@ -98,6 +99,15 @@ export async function login(data) {
   const isMatch = await bcrypt.compare(password, user.password_hash);
   if (!isMatch) {
     throw new AppError('Sai mật khẩu hoặc không có tài khoản.', 401);
+  }
+
+  // Kiểm tra trạng thái tài khoản (chặn tài khoản bị khóa hoặc ngừng hoạt động)
+  const userStatus = (user.status || 'ACTIVE').toUpperCase();
+  if (userStatus === 'LOCKED') {
+    throw new AppError('Tài khoản của bạn đã bị khóa. Vui lòng liên hệ chủ sân để được hỗ trợ.', 403);
+  }
+  if (userStatus === 'INACTIVE') {
+    throw new AppError('Tài khoản này đã ngừng hoạt động trong hệ thống.', 403);
   }
 
   const normalizedRole = (user.role || 'PLAYER').toLowerCase();
@@ -122,6 +132,7 @@ export async function login(data) {
       phone: user.phone,
       email: user.email,
       role: normalizedRole,
+      avatarUrl: user.avatar_url || null,
       createdAt: user.created_at,
     },
   };
@@ -161,13 +172,14 @@ export async function googleLogin(credential) {
   const googleEmail = payload.email.trim().toLowerCase();
   const googleName = payload.name || payload.email.split('@')[0];
   const googleSub = payload.sub || Date.now().toString();
+  const googlePicture = payload.picture || null;
 
   const pool = await getPool();
 
   // 2. Kiểm tra xem người dùng đã tồn tại trong bảng users chưa
   const result = await pool.request()
     .input('email', googleEmail)
-    .query('SELECT user_id, full_name, phone, email, role, created_at FROM users WHERE LOWER(email) = @email');
+    .query('SELECT user_id, full_name, phone, email, role, avatar_url, created_at FROM users WHERE LOWER(email) = @email');
 
   let user = result.recordset[0];
 
@@ -181,12 +193,24 @@ export async function googleLogin(credential) {
       .input('phone', randomPhone)
       .input('email', googleEmail)
       .input('password', placeholderPassword)
+      .input('avatarUrl', googlePicture)
       .query(`
-        INSERT INTO users (full_name, phone, email, password_hash, role, reputation_score, created_at)
-        OUTPUT INSERTED.user_id, INSERTED.full_name, INSERTED.phone, INSERTED.email, INSERTED.role, INSERTED.created_at
-        VALUES (@fullName, @phone, @email, @password, 'PLAYER', 5.0, GETDATE())
+        INSERT INTO users (full_name, phone, email, password_hash, role, avatar_url, reputation_score, created_at)
+        OUTPUT INSERTED.user_id, INSERTED.full_name, INSERTED.phone, INSERTED.email, INSERTED.role, INSERTED.avatar_url, INSERTED.created_at
+        VALUES (@fullName, @phone, @email, @password, 'PLAYER', @avatarUrl, 5.0, GETDATE())
       `);
     user = insertResult.recordset[0];
+  } else if (!user.avatar_url && googlePicture) {
+    // Nếu user chưa có avatar nhưng Google có, cập nhật avatar
+    try {
+      await pool.request()
+        .input('userId', user.user_id)
+        .input('avatarUrl', googlePicture)
+        .query('UPDATE users SET avatar_url = @avatarUrl WHERE user_id = @userId');
+      user.avatar_url = googlePicture;
+    } catch (e) {
+      // bỏ qua nếu lỗi
+    }
   }
 
   const normalizedRole = (user.role || 'PLAYER').toLowerCase();
@@ -211,6 +235,7 @@ export async function googleLogin(credential) {
       phone: user.phone,
       email: user.email,
       role: normalizedRole,
+      avatarUrl: user.avatar_url || googlePicture || null,
       createdAt: user.created_at,
     },
   };
@@ -224,7 +249,7 @@ export async function getUserById(userId) {
   const pool = await getPool();
   const result = await pool.request()
     .input('id', userId)
-    .query('SELECT user_id, full_name, phone, email, role, reputation_score, created_at FROM users WHERE user_id = @id');
+    .query('SELECT user_id, full_name, phone, email, role, avatar_url, reputation_score, created_at FROM users WHERE user_id = @id');
 
   const user = result.recordset[0];
   if (!user) return null;
@@ -235,7 +260,23 @@ export async function getUserById(userId) {
     phone: user.phone,
     email: user.email,
     role: (user.role || 'PLAYER').toLowerCase(),
+    avatarUrl: user.avatar_url || null,
     reputationScore: user.reputation_score,
     createdAt: user.created_at,
   };
+}
+
+/**
+ * Cập nhật đường dẫn ảnh đại diện cho người dùng trong cơ sở dữ liệu.
+ * @param {number} userId
+ * @param {string} avatarUrl
+ */
+export async function updateAvatar(userId, avatarUrl) {
+  const pool = await getPool();
+  await pool.request()
+    .input('userId', userId)
+    .input('avatarUrl', avatarUrl)
+    .query('UPDATE users SET avatar_url = @avatarUrl WHERE user_id = @userId');
+
+  return { avatarUrl };
 }

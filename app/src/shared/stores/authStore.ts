@@ -8,6 +8,7 @@ export interface User {
   fullName: string;
   email: string;
   role: UserRole;
+  avatarUrl?: string | null;
 }
 
 interface AuthState {
@@ -15,6 +16,7 @@ interface AuthState {
   token: string | null;
   isAuthenticated: boolean;
   setAuth: (user: User, token: string) => void;
+  updateUserAvatar: (avatarUrl: string) => void;
   logout: () => void;
 }
 
@@ -31,6 +33,11 @@ export const useAuthStore = create<AuthState>()(
 
       setAuth: (user, token) =>
         set({ user, token, isAuthenticated: true }),
+
+      updateUserAvatar: (avatarUrl: string) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, avatarUrl } : null,
+        })),
 
       logout: () =>
         set({ user: null, token: null, isAuthenticated: false }),
