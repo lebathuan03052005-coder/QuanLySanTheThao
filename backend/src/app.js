@@ -1,9 +1,15 @@
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import bookingRouter from './modules/bookings/booking.route.js';
 import matchRouter from './modules/matches/match.route.js';
 import authRouter from './modules/auth/auth.route.js';
 import courtRouter from './modules/courts/court.route.js';
+import staffRouter from './modules/staff/staff.route.js';
 import { errorHandler } from './core/middlewares/errorHandler.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -23,11 +29,15 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
+// Phục vụ thư mục tĩnh uploads (ảnh đại diện, hình ảnh hệ thống)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // Routes
 app.use('/api/auth', authRouter);
 app.use('/api/courts', courtRouter);
 app.use('/api/bookings', bookingRouter);
 app.use('/api/matches', matchRouter);
+app.use('/api/staff', staffRouter);
 
 // Centralized error handler
 app.use(errorHandler);
