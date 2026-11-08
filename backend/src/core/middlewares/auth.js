@@ -17,7 +17,10 @@ export function verifyToken(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'sportlink_jwt_super_secret_key_2026');
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || 'sportlink_jwt_super_secret_key_2026'
+    );
     req.user = decoded;
     next();
   } catch (err) {
@@ -71,6 +74,53 @@ export function authorize(...roles) {
 }
 
 /**
+ * Middleware kiểm tra trạng thái hoạt động của tài khoản (Active Account Check).
+ * Ngăn chặn tức thì các tài khoản đã bị khóa (LOCKED) hoặc ngừng hoạt động (INACTIVE).
+ */
+export async function checkAccountStatus(req, res, next) {
+  if (!req.user || !req.user.id) {
+    return next();
+  }
+
+  try {
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('id', req.user.id)
+      .query('SELECT user_id, status, role FROM users WHERE user_id = @id');
+
+    const user = result.recordset[0];
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Tài khoản không tồn tại trong hệ thống.',
+      });
+    }
+
+    const status = (user.status || 'ACTIVE').toUpperCase();
+    if (status === 'LOCKED') {
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ chủ sân để được hỗ trợ.',
+        code: 'ACCOUNT_LOCKED',
+      });
+    }
+
+    if (status === 'INACTIVE') {
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản này đã ngừng hoạt động trong hệ thống.',
+        code: 'ACCOUNT_INACTIVE',
+      });
+    }
+
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Middleware kiểm soát quyền sở hữu sân bóng (Data Ownership Scoping).
  * Đảm bảo Chủ sân (owner) chỉ được sửa/xóa sân của chính mình theo schema bảng courts.
  */
@@ -87,7 +137,8 @@ export async function checkCourtOwnership(req, res, next) {
     }
 
     const pool = await getPool();
-    const result = await pool.request()
+    const result = await pool
+      .request()
       .input('id', courtId)
       .query('SELECT court_id, owner_id, court_name FROM courts WHERE court_id = @id');
 
@@ -96,7 +147,7 @@ export async function checkCourtOwnership(req, res, next) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sân bóng này.' });
     }
 
-    // Kiểm tra quyền sở hữu phía máy chủ (Server-side ownership check)
+    // Kiểm tra quyền sở hữu phía máy chủ
     if (court.owner_id !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -113,7 +164,6 @@ export async function checkCourtOwnership(req, res, next) {
 
 /**
  * Middleware kiểm soát quyền sở hữu lịch đặt sân (Booking Ownership).
- * Phù hợp với schema bảng bookings và courts trong mục dulieu.
  */
 export async function checkBookingOwnership(req, res, next) {
   try {
@@ -128,9 +178,7 @@ export async function checkBookingOwnership(req, res, next) {
     }
 
     const pool = await getPool();
-    const result = await pool.request()
-      .input('id', bookingId)
-      .query(`
+    const result = await pool.request().input('id', bookingId).query(`
         SELECT b.booking_id, b.user_id, b.court_id, b.status, c.owner_id
         FROM bookings b
         JOIN courts c ON b.court_id = c.court_id
@@ -158,7 +206,67 @@ export async function checkBookingOwnership(req, res, next) {
       });
     }
 
+    // Nếu là Nhân viên (staff) -> kiểm tra xem có được phân công quản lý sân này không
+    if (userRole === 'staff') {
+      const staffCheck = await pool
+        .request()
+        .input('staffId', req.user.id)
+        .input('courtId', booking.court_id)
+        .query('SELECT assignment_id FROM court_staff WHERE staff_id = @staffId AND court_id = @courtId');
+
+      if (staffCheck.recordset.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'Bạn không được phân công quản lý sân chứa lịch đặt này.',
+          code: 'COURT_ACCESS_DENIED',
+        });
+      }
+    }
+
     req.booking = booking;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Middleware kiểm tra phạm vi sân được phân công của Nhân viên (Staff Court Scope).
+ */
+export async function checkStaffCourtAccess(req, res, next) {
+  const userRole = (req.user?.role || '').toLowerCase();
+  if (userRole === 'admin' || userRole === 'owner') {
+    return next();
+  }
+
+  if (userRole !== 'staff') {
+    return res.status(403).json({
+      success: false,
+      message: 'Chỉ nhân viên hoặc chủ sân mới có quyền thực hiện thao tác này.',
+    });
+  }
+
+  const courtId = parseInt(req.params.courtId || req.body.courtId || req.query.courtId);
+  if (!courtId) {
+    return next();
+  }
+
+  try {
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('staffId', req.user.id)
+      .input('courtId', courtId)
+      .query('SELECT assignment_id FROM court_staff WHERE staff_id = @staffId AND court_id = @courtId');
+
+    if (result.recordset.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn không được phân công quản lý sân này.',
+        code: 'COURT_ACCESS_DENIED',
+      });
+    }
+
     next();
   } catch (err) {
     next(err);

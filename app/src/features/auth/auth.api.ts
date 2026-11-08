@@ -20,6 +20,8 @@ export interface RawUserData {
   Email?: string;
   role?: UserRole;
   Role?: UserRole;
+  avatarUrl?: string;
+  avatar_url?: string;
 }
 
 export interface LoginResponse {
@@ -47,4 +49,19 @@ export async function register(payload: RegisterPayload) {
 export async function getProfile() {
   const res = await api.get('/auth/profile');
   return res.data.data;
+}
+
+export async function uploadAvatarApi(file: File): Promise<{ success: boolean; data: { avatarUrl: string }; message?: string }> {
+  const formData = new FormData();
+  formData.append('avatar', file);
+  const res = await api.post<{ success: boolean; data: { avatarUrl: string }; message?: string }>(
+    '/auth/avatar',
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  );
+  return res.data;
 }
