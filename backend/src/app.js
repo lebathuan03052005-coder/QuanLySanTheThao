@@ -6,6 +6,8 @@ import matchRouter from './modules/matches/match.route.js';
 import authRouter from './modules/auth/auth.route.js';
 import courtRouter from './modules/courts/court.route.js';
 import staffRouter from './modules/staff/staff.route.js';
+import customerRouter from './modules/customers/customer.route.js';
+import analyticsRouter from './modules/analytics/analytics.route.js';
 import { errorHandler } from './core/middlewares/errorHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,7 +22,7 @@ app.use((req, res, next) => {
     'Access-Control-Allow-Headers',
     'Origin, X-Requested-With, Content-Type, Accept, Authorization'
   );
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -38,6 +40,8 @@ app.use('/api/courts', courtRouter);
 app.use('/api/bookings', bookingRouter);
 app.use('/api/matches', matchRouter);
 app.use('/api/staff', staffRouter);
+app.use('/api/customers', customerRouter);
+app.use('/api/analytics', analyticsRouter);
 
 // Centralized error handler
 app.use(errorHandler);

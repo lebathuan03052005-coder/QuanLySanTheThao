@@ -126,7 +126,7 @@ export default function OwnerSidebar() {
   const mainNavItems: NavItem[] = [
     {
       to: "/owner/bookings",
-      label: "Lịch dặt sân ",
+      label: "Lịch đặt sân",
       icon: () => (
         <svg
           className="w-5 h-5 shrink-0"
@@ -213,6 +213,25 @@ export default function OwnerSidebar() {
             strokeWidth={1.8}
             strokeLinecap="round"
             d="M19 14c2 .8 3 2.2 3 4"
+          />
+        </svg>
+      ),
+    },
+    {
+      to: "/owner/players",
+      label: "Khách hàng",
+      icon: () => (
+        <svg
+          className="w-5 h-5 shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <circle cx="12" cy="8" r="4" strokeWidth={1.8} />
+          <path
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            d="M4 20c0-3.8 3.6-6.5 8-6.5s8 2.7 8 6.5"
           />
         </svg>
       ),

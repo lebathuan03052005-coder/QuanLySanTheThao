@@ -4,6 +4,10 @@ import PlayerLayout from "./shared/layouts/PlayerLayout";
 import OwnerLayout from "./shared/layouts/OwnerLayout";
 import MatchListPage from "./features/matches/MatchListPage";
 import StaffManagementPage from "./features/staff/StaffManagementPage";
+import CourtSchedulePage from "./features/booking/CourtSchedulePage";
+import CustomerManagementPage from "./features/customers/CustomerManagementPage";
+import RevenueDashboardPage from "./features/analytics/RevenueDashboardPage";
+import OccupancyAnalyticsPage from "./features/analytics/OccupancyAnalyticsPage";
 import { useAuthStore } from "./shared/stores/authStore";
 
 function AdminPlaceholder() {
@@ -91,30 +95,15 @@ export default function App() {
         {/* Route dành cho Owner / Chủ sân (Khớp với các mục trên Sidebar) */}
         <Route path="/owner" element={<OwnerLayout />}>
           <Route index element={<Navigate to="/owner/analytics" replace />} />
-          <Route
-            path="analytics"
-            element={
-              <div className="p-4 text-gray-700 font-medium">
-                Bảng thống kê Analytics (Owner)
-              </div>
-            }
-          />
-          <Route
-            path="bookings"
-            element={
-              <div className="p-4 text-gray-700 font-medium">
-                Quản lý lịch đặt sân (Owner)
-              </div>
-            }
-          />
-          <Route
-            path="revenue"
-            element={
-              <div className="p-4 text-gray-700 font-medium">
-                Báo cáo doanh thu & Billing (Owner)
-              </div>
-            }
-          />
+          {/* [3.3] Thống kê tỷ lệ lấp đầy sân & khung giờ vắng (S2-10) */}
+          <Route path="analytics" element={<OccupancyAnalyticsPage />} />
+
+          {/* [3.1] Lịch sân theo Ngày/Tuần/Tháng (S2-05) */}
+          <Route path="bookings" element={<CourtSchedulePage />} />
+
+          {/* [3.3] Dashboard doanh thu theo ngày/tuần/tháng (S2-09) */}
+          <Route path="revenue" element={<RevenueDashboardPage />} />
+
           <Route
             path="courts"
             element={
@@ -123,8 +112,14 @@ export default function App() {
               </div>
             }
           />
+
+          {/* [3.1] Quản lý nhân viên và cấp quyền (S2-04) */}
           <Route path="staff" element={<StaffManagementPage />} />
-          <Route path="players" element={<StaffManagementPage />} />
+
+          {/* [3.1] Quản lý khách hàng và lịch sử đặt sân (S2-06) */}
+          <Route path="players" element={<CustomerManagementPage />} />
+          <Route path="customers" element={<CustomerManagementPage />} />
+
           <Route
             path="tournaments"
             element={
