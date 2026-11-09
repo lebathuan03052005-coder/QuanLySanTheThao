@@ -4,6 +4,8 @@ import PlayerLayout from "./shared/layouts/PlayerLayout";
 import OwnerLayout from "./shared/layouts/OwnerLayout";
 import MatchListPage from "./features/matches/MatchListPage";
 import StaffManagementPage from "./features/staff/StaffManagementPage";
+import FacilityManagementPage from "./features/facilities/FacilityManagementPage";
+import SportManagementPage from "./features/sports/SportManagementPage";
 import { useAuthStore } from "./shared/stores/authStore";
 
 function AdminPlaceholder() {
@@ -115,14 +117,8 @@ export default function App() {
               </div>
             }
           />
-          <Route
-            path="courts"
-            element={
-              <div className="p-4 text-gray-700 font-medium">
-                Quản lý sân bóng (Owner)
-              </div>
-            }
-          />
+          <Route path="courts" element={<FacilityManagementPage />} />
+          <Route path="sports" element={<SportManagementPage />} />
           <Route path="staff" element={<StaffManagementPage />} />
           <Route path="players" element={<StaffManagementPage />} />
           <Route

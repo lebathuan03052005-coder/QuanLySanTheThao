@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { getPool } from '../../core/config/db.js';
 import { AppError } from '../../core/errors/AppError.js';
