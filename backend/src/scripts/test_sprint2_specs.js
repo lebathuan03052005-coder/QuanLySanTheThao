@@ -7,11 +7,16 @@ async function runTests() {
   console.log('KIỂM THỬ ĐẶC TẢ SPRINT 2 (WBS 3.1): CƠ SỞ, SÂN & MÔN');
   console.log('====================================================');
 
-  const ownerId = 0; // Tài khoản owner@sportlink.vn
-  const strangerOwnerId = 999;
+  const pool = await getPool();
+  const ownerRes = await pool.request().query("SELECT TOP 1 user_id FROM users WHERE UPPER(role) = 'OWNER' ORDER BY user_id ASC");
+  const ownerId = ownerRes.recordset[0]?.user_id ?? 0;
+  const strangerOwnerId = 999999;
 
   let passed = 0;
   let failed = 0;
+  let createdFacId = null;
+  let createdCourtId = null;
+  let createdSportId = null;
 
   function assert(condition, message) {
     if (condition) {
@@ -31,6 +36,7 @@ async function runTests() {
       phone: '0909999999',
       description: 'Cơ sở phục vụ test tự động',
     });
+    createdFacId = fac?.facility_id;
     assert(fac && fac.facility_id && fac.owner_id === ownerId, 'TC-FAC-01: OWNER thêm cơ sở hợp lệ');
 
     // TC-FAC-02: Thiếu tên hoặc địa chỉ bắt buộc
@@ -58,13 +64,18 @@ async function runTests() {
     }
     assert(tcFac04Passed, 'TC-FAC-04: Từ chối khi OWNER khác cố gắng sửa cơ sở');
 
+    // Lấy 1 sport_id đang ACTIVE
+    const sports = await sportService.getAllSports({ status: 'ACTIVE' });
+    const activeSportId = sports[0]?.sport_id ?? 0;
+
     // TC-COURT-01: Thêm sân con vào cơ sở hợp lệ
     const court = await facilityService.createCourtInFacility(fac.facility_id, ownerId, {
-      courtName: 'Sân Cỏ 5 Người Số 1',
-      sportId: 0,
+      courtName: 'Sân Cỏ 5 Người Số 1 (Test)',
+      sportId: activeSportId,
       capacity: 10,
       description: 'Sân cỏ nhân tạo chất lượng cao',
     });
+    createdCourtId = court?.court_id;
     assert(
       court && court.court_id && court.facility_id === fac.facility_id,
       'TC-COURT-01: Thêm sân con vào cơ sở hợp lệ'
@@ -73,7 +84,7 @@ async function runTests() {
     // TC-COURT-02: Thêm sân vào cơ sở không tồn tại
     let tcCourt02Passed = false;
     try {
-      await facilityService.createCourtInFacility(999999, ownerId, { courtName: 'Sân Ma', sportId: 0 });
+      await facilityService.createCourtInFacility(999999, ownerId, { courtName: 'Sân Ma', sportId: activeSportId });
     } catch (err) {
       tcCourt02Passed = err.statusCode === 404;
     }
@@ -82,7 +93,7 @@ async function runTests() {
     // TC-COURT-03: Thêm sân vào cơ sở của OWNER khác
     let tcCourt03Passed = false;
     try {
-      await facilityService.createCourtInFacility(fac.facility_id, strangerOwnerId, { courtName: 'Sân Lạ', sportId: 0 });
+      await facilityService.createCourtInFacility(fac.facility_id, strangerOwnerId, { courtName: 'Sân Lạ', sportId: activeSportId });
     } catch (err) {
       tcCourt03Passed = err.statusCode === 404 || err.statusCode === 403;
     }
@@ -98,6 +109,7 @@ async function runTests() {
       sportName: testSportName,
       description: 'Môn thể thao kiểm thử tự động',
     });
+    createdSportId = newSport?.sport_id;
     assert(newSport && newSport.sport_id && newSport.sport_name === testSportName, 'TC-SPORT-01: Thêm môn thể thao hợp lệ');
 
     // TC-SPORT-02: Thêm môn thiếu tên
@@ -134,9 +146,24 @@ async function runTests() {
   } catch (err) {
     console.error('Lỗi ngoại lệ trong quá trình chạy test:', err);
   } finally {
+    // Dọn dẹp toàn bộ dữ liệu tạm sinh ra trong quá trình kiểm thử
+    try {
+      await pool.request().query(`
+        IF EXISTS (SELECT * FROM sys.tables WHERE name = 'court_prices')
+        BEGIN
+          DELETE FROM court_prices WHERE court_id IN (
+            SELECT court_id FROM courts WHERE court_name LIKE N'%Kiểm Thử%' OR court_name LIKE N'Sân Cỏ 5 Người Số 1%'
+          );
+        END
+        DELETE FROM courts WHERE court_name LIKE N'%Kiểm Thử%' OR court_name LIKE N'Sân Cỏ 5 Người Số 1%';
+        DELETE FROM facilities WHERE name LIKE N'%Kiểm Thử Tự Động%';
+        DELETE FROM sports WHERE sport_name LIKE N'Môn Test %';
+      `);
+    } catch {
+      // ignore cleanup error
+    }
     process.exit(0);
   }
 }
 
 runTests();
-

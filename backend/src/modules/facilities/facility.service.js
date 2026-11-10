@@ -1,12 +1,184 @@
 import { getPool } from '../../core/config/db.js';
 import { AppError } from '../../core/errors/AppError.js';
+import { ensureSportSchema } from '../sports/sport.service.js';
 
 /**
  * ============================================================================
  * SPORTLINK - FACILITY & SUB-COURT SERVICE
- * Đáp ứng đặc tả chức năng WBS 3.1: Quản lý cơ sở sân & danh sách sân con
+ * Đáp ứng đặc tả chức năng WBS 3.1 (S2-02): Quản lý cơ sở sân & danh sách sân con
+ * Tự động đồng bộ schema bảng [facilities] và [courts] khi khởi chạy để các
+ * thành viên trong nhóm (Luân, Thuần) pull code về chạy ngay không bị lỗi 500,
+ * đồng thời gom các sân nhỏ (Sân 1, 2, 3...) vào từng Cơ sở sân.
  * ============================================================================
  */
+
+let facilitySchemaReady = false;
+
+/**
+ * Tự động tạo bảng [facilities], bổ sung các cột mở rộng vào bảng [courts],
+ * dọn dẹp dữ liệu test lỗi font '?' và tự động gom các sân sẵn có (facility_id IS NULL)
+ * vào cơ sở tương ứng của Chủ sân.
+ * @param {number} [ownerId]
+ */
+export async function ensureFacilitySchema(ownerId) {
+  await ensureSportSchema();
+  const pool = await getPool();
+
+  if (!facilitySchemaReady) {
+    try {
+      // 1. Tạo bảng facilities nếu chưa tồn tại
+      await pool.request().query(`
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'facilities')
+        BEGIN
+          CREATE TABLE [dbo].[facilities] (
+            [facility_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+            [owner_id] INT NOT NULL,
+            [name] NVARCHAR(150) NOT NULL,
+            [address] NVARCHAR(255) NOT NULL,
+            [phone] VARCHAR(20) NULL,
+            [description] NVARCHAR(MAX) NULL,
+            [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            [created_at] DATETIME DEFAULT GETDATE(),
+            [updated_at] DATETIME DEFAULT GETDATE(),
+            CONSTRAINT [fk_facilities_owner] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id])
+          );
+        END
+      `);
+
+      // 2. Đảm bảo bảng courts có đủ các cột mở rộng (facility_id, capacity, images, created_at, updated_at)
+      await pool.request().query(`
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'facility_id')
+        BEGIN
+          ALTER TABLE [dbo].[courts] ADD [facility_id] INT NULL;
+        END
+
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'capacity')
+        BEGIN
+          ALTER TABLE [dbo].[courts] ADD [capacity] INT NULL;
+        END
+
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'images')
+        BEGIN
+          ALTER TABLE [dbo].[courts] ADD [images] NVARCHAR(MAX) NULL;
+        END
+
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'created_at')
+        BEGIN
+          ALTER TABLE [dbo].[courts] ADD [created_at] DATETIME DEFAULT GETDATE();
+        END
+
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'updated_at')
+        BEGIN
+          ALTER TABLE [dbo].[courts] ADD [updated_at] DATETIME DEFAULT GETDATE();
+        END
+
+        -- Mở rộng CHECK constraint cho cột status của bảng courts để hỗ trợ cả ACTIVE, INACTIVE, CLOSED, MAINTENANCE
+        DECLARE @courtChkName NVARCHAR(256) = (
+          SELECT TOP 1 name FROM sys.check_constraints 
+          WHERE parent_object_id = OBJECT_ID('dbo.courts') AND definition LIKE '%status%'
+        );
+        IF @courtChkName IS NOT NULL
+        BEGIN
+          EXEC('ALTER TABLE [dbo].[courts] DROP CONSTRAINT [' + @courtChkName + ']');
+          ALTER TABLE [dbo].[courts] WITH CHECK ADD CHECK ([status]='ACTIVE' OR [status]='INACTIVE' OR [status]='CLOSED' OR [status]='MAINTENANCE');
+        END
+      `);
+
+      // 3. Dọn dẹp dữ liệu test cũ bị lỗi mã hóa '?' (ví dụ 'Co s? Test', '123 Du?ng Test')
+      await pool.request().query(`
+        DELETE FROM [dbo].[courts]
+        WHERE ([court_name] LIKE '%?%' OR [address] LIKE '%?%')
+          AND [court_id] NOT IN (SELECT DISTINCT [court_id] FROM [dbo].[bookings] WHERE [court_id] IS NOT NULL);
+
+        UPDATE [dbo].[courts]
+        SET [facility_id] = NULL
+        WHERE [facility_id] IN (
+          SELECT [facility_id] FROM [dbo].[facilities]
+          WHERE [name] LIKE '%?%' OR [address] LIKE '%?%'
+        );
+
+        DELETE FROM [dbo].[facilities]
+        WHERE [name] LIKE '%?%' OR [address] LIKE '%?%';
+      `);
+
+      facilitySchemaReady = true;
+    } catch (err) {
+      console.error('Cảnh báo đồng bộ schema bảng facilities/courts:', err.message);
+    }
+  }
+
+  // 4. Tự động khởi tạo Cơ sở sân và liên kết các sân con (Sân 1, 2, 3...) cho Chủ sân thật trong DB
+  if (ownerId !== undefined && ownerId !== null) {
+    try {
+      const userCheck = await pool.request()
+        .input('ownerId', ownerId)
+        .query("SELECT [user_id] FROM [dbo].[users] WHERE [user_id] = @ownerId AND UPPER([role]) IN ('OWNER', 'ADMIN')");
+
+      if (userCheck.recordset.length === 0) {
+        return;
+      }
+
+      const facCountRes = await pool.request()
+        .input('ownerId', ownerId)
+        .query('SELECT COUNT(*) AS total FROM [dbo].[facilities] WHERE [owner_id] = @ownerId');
+
+      const ownerFacCount = facCountRes.recordset[0]?.total || 0;
+
+      if (ownerFacCount === 0) {
+        await pool.request()
+          .input('ownerId', ownerId)
+          .query(`
+            INSERT INTO [dbo].[facilities] ([owner_id], [name], [address], [phone], [description], [status], [created_at], [updated_at])
+            VALUES 
+              (@ownerId, N'Cơ sở 1 - Cụm Sân Thể Thao SportLink Man Thiện', N'97 Man Thiện, P. Hiệp Phú, TP. Thủ Đức, TP.HCM', '0901234567', N'Tổ hợp sân bóng đá cỏ nhân tạo 5 người và 7 người (Sân 5A, Sân 5B, Sân 7B) phục vụ đặt lịch và giải đấu', 'ACTIVE', GETDATE(), GETDATE()),
+              (@ownerId, N'Cơ sở 2 - Tổ Hợp Thể Thao SportLink Arena Lê Văn Việt', N'112 Lê Văn Việt, P. Tăng Nhơn Phú A, TP. Thủ Đức, TP.HCM', '0901234568', N'Tổ hợp sân Cầu lông trong nhà, sân Pickleball có mái che và sân Tennis tiêu chuẩn (Sân VIP 1, VIP 2, P1, T1)', 'ACTIVE', GETDATE(), GETDATE());
+          `);
+      }
+
+      // Liên kết các sân con đã có sẵn trong bảng courts nhưng chưa gán facility_id
+      const orphanCourts = await pool.request()
+        .input('ownerId', ownerId)
+        .query(`
+          SELECT [court_id], [court_name], [address]
+          FROM [dbo].[courts]
+          WHERE [owner_id] = @ownerId
+            AND ([facility_id] IS NULL OR [facility_id] NOT IN (SELECT [facility_id] FROM [dbo].[facilities]))
+        `);
+
+      const ownerFacs = await pool.request()
+        .input('ownerId', ownerId)
+        .query('SELECT [facility_id], [name], [address] FROM [dbo].[facilities] WHERE [owner_id] = @ownerId ORDER BY [facility_id] ASC');
+
+      if (ownerFacs.recordset.length > 0) {
+        const fac1 = ownerFacs.recordset[0];
+        const fac2 = ownerFacs.recordset[1] || fac1;
+
+        for (let i = 0; i < orphanCourts.recordset.length; i++) {
+          const c = orphanCourts.recordset[i];
+          const isManThien =
+            (c.address && c.address.toLowerCase().includes('man thiện')) ||
+            (c.court_name && c.court_name.toLowerCase().includes('man thiện')) ||
+            (c.court_name && c.court_name.toLowerCase().includes('bóng đá'));
+          const targetFacId = isManThien ? fac1.facility_id : fac2.facility_id;
+
+          await pool.request()
+            .input('facId', targetFacId)
+            .input('courtId', c.court_id)
+            .query(`
+              UPDATE [dbo].[courts]
+              SET [facility_id] = @facId,
+                  [capacity] = ISNULL([capacity], 10),
+                  [created_at] = ISNULL([created_at], GETDATE()),
+                  [updated_at] = ISNULL([updated_at], GETDATE())
+              WHERE [court_id] = @courtId
+            `);
+        }
+      }
+    } catch (err) {
+      console.error('Cảnh báo liên kết dữ liệu sân con vào cơ sở:', err.message);
+    }
+  }
+}
 
 /**
  * Lấy danh sách cơ sở thuộc quyền quản lý của OWNER hiện tại.
@@ -14,6 +186,7 @@ import { AppError } from '../../core/errors/AppError.js';
  * @param {{ search?: string, status?: string }} filters
  */
 export async function getOwnerFacilities(ownerId, filters = {}) {
+  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
   const { search = '', status = 'ALL' } = filters;
 
@@ -70,13 +243,22 @@ export async function getOwnerFacilities(ownerId, filters = {}) {
  * @param {number} ownerId
  */
 export async function getFacilityById(facilityId, ownerId) {
+  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
   const result = await pool.request()
     .input('facilityId', facilityId)
     .input('ownerId', ownerId)
     .query(`
       SELECT 
-        f.*,
+        f.facility_id,
+        f.owner_id,
+        f.name,
+        f.address,
+        f.phone,
+        f.description,
+        f.status,
+        f.created_at,
+        f.updated_at,
         COUNT(c.court_id) AS total_courts
       FROM facilities f
       LEFT JOIN courts c ON f.facility_id = c.facility_id
@@ -99,6 +281,7 @@ export async function getFacilityById(facilityId, ownerId) {
  * @param {{ name: string, address: string, phone?: string, description?: string }} data
  */
 export async function createFacility(ownerId, data) {
+  await ensureFacilitySchema(ownerId);
   const { name, address, phone = '', description = '' } = data;
 
   if (!name || !name.trim()) {
@@ -131,6 +314,7 @@ export async function createFacility(ownerId, data) {
  * @param {{ name?: string, address?: string, phone?: string, description?: string }} data
  */
 export async function updateFacility(facilityId, ownerId, data) {
+  await ensureFacilitySchema(ownerId);
   const { name, address, phone, description } = data;
 
   // Xác minh cơ sở thuộc về OWNER
@@ -163,6 +347,14 @@ export async function updateFacility(facilityId, ownerId, data) {
       WHERE facility_id = @facilityId AND owner_id = @ownerId
     `);
 
+  // Đồng bộ địa chỉ mới của cơ sở xuống các sân con trực thuộc
+  if (address && address.trim()) {
+    await pool.request()
+      .input('facilityId', facilityId)
+      .input('address', address.trim())
+      .query('UPDATE courts SET address = @address WHERE facility_id = @facilityId');
+  }
+
   return result.recordset[0];
 }
 
@@ -173,6 +365,7 @@ export async function updateFacility(facilityId, ownerId, data) {
  * @param {'ACTIVE' | 'INACTIVE'} status
  */
 export async function updateFacilityStatus(facilityId, ownerId, status) {
+  await ensureFacilitySchema(ownerId);
   const normalizedStatus = (status || '').toUpperCase();
   if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
     throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);
@@ -219,12 +412,13 @@ export async function getCourtsByFacility(facilityId, ownerId, filters = {}) {
     SELECT 
       c.court_id,
       c.facility_id,
+      f.name AS facility_name,
       c.owner_id,
       c.sport_id,
       s.sport_name,
       c.court_name,
       c.address,
-      c.capacity,
+      ISNULL(c.capacity, 10) AS capacity,
       c.description,
       c.utilities,
       c.status,
@@ -232,6 +426,7 @@ export async function getCourtsByFacility(facilityId, ownerId, filters = {}) {
       c.created_at,
       c.updated_at
     FROM courts c
+    LEFT JOIN facilities f ON c.facility_id = f.facility_id
     LEFT JOIN sports s ON c.sport_id = s.sport_id
     WHERE c.facility_id = @facilityId
   `;
@@ -314,7 +509,29 @@ export async function createCourtInFacility(facilityId, ownerId, data) {
       )
     `);
 
-  return result.recordset[0];
+  const createdCourt = result.recordset[0];
+
+  // Nếu bảng court_prices tồn tại (tích hợp với Lịch đặt sân & Giá động của Luân), tạo khung giá mặc định cho sân con mới
+  if (createdCourt?.court_id) {
+    try {
+      await pool.request()
+        .input('courtId', createdCourt.court_id)
+        .query(`
+          IF EXISTS (SELECT * FROM sys.tables WHERE name = 'court_prices')
+          AND NOT EXISTS (SELECT 1 FROM [dbo].[court_prices] WHERE [court_id] = @courtId)
+          BEGIN
+            INSERT INTO [dbo].[court_prices] ([court_id], [day_type], [start_time], [end_time], [price]) VALUES
+              (@courtId, 'WEEKDAY', '06:00:00', '16:00:00', 150000),
+              (@courtId, 'WEEKDAY', '16:00:00', '22:00:00', 250000),
+              (@courtId, 'WEEKEND', '06:00:00', '22:00:00', 300000);
+          END
+        `);
+    } catch {
+      // Bỏ qua nếu bảng court_prices chưa được tạo
+    }
+  }
+
+  return createdCourt;
 }
 
 /**
@@ -324,6 +541,7 @@ export async function createCourtInFacility(facilityId, ownerId, data) {
  * @param {{ courtName?: string, sportId?: number, capacity?: number, description?: string, utilities?: string, images?: string }} data
  */
 export async function updateCourtInFacility(courtId, ownerId, data) {
+  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
 
   // Kiểm tra sân tồn tại và thuộc về OWNER
@@ -393,6 +611,7 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
  * @param {'ACTIVE' | 'INACTIVE'} status
  */
 export async function updateCourtStatus(courtId, ownerId, status) {
+  await ensureFacilitySchema(ownerId);
   const normalizedStatus = (status || '').toUpperCase();
   if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
     throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);
@@ -429,4 +648,3 @@ export async function updateCourtStatus(courtId, ownerId, status) {
 
   return result.recordset[0];
 }
-

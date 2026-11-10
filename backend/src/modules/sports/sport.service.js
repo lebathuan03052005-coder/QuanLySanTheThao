@@ -4,15 +4,92 @@ import { AppError } from '../../core/errors/AppError.js';
 /**
  * ============================================================================
  * SPORTLINK - SPORT TYPE MANAGEMENT SERVICE
- * Đáp ứng đặc tả chức năng WBS 3.1: Quản lý loại môn thể thao
+ * Đáp ứng đặc tả chức năng WBS 3.1 (S2-03): Quản lý loại môn thể thao
+ * Tự động đồng bộ schema bảng [sports] khi khởi chạy để không bao giờ lỗi 500
+ * khi các thành viên trong nhóm pull code về máy mới.
  * ============================================================================
  */
+
+let sportSchemaReady = false;
+
+/**
+ * Đảm bảo bảng [sports] có đầy đủ các cột mở rộng (status, created_at, updated_at)
+ * và dữ liệu môn thể thao mặc định.
+ */
+export async function ensureSportSchema() {
+  if (sportSchemaReady) return;
+  const pool = await getPool();
+
+  try {
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'sports')
+      BEGIN
+        CREATE TABLE [dbo].[sports] (
+          [sport_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          [sport_name] NVARCHAR(100) NOT NULL,
+          [description] NVARCHAR(500) NULL,
+          [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+          [created_at] DATETIME DEFAULT GETDATE(),
+          [updated_at] DATETIME DEFAULT GETDATE()
+        );
+      END
+
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'status')
+      BEGIN
+        ALTER TABLE [dbo].[sports] ADD [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';
+      END
+
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'created_at')
+      BEGIN
+        ALTER TABLE [dbo].[sports] ADD [created_at] DATETIME DEFAULT GETDATE();
+      END
+
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'updated_at')
+      BEGIN
+        ALTER TABLE [dbo].[sports] ADD [updated_at] DATETIME DEFAULT GETDATE();
+      END
+    `);
+
+    // Xóa dữ liệu test bị lỗi font chữ '?' nếu có và chuẩn hóa status NULL -> 'ACTIVE'
+    await pool.request().query(`
+      UPDATE [dbo].[sports]
+      SET [status] = 'ACTIVE',
+          [created_at] = ISNULL([created_at], GETDATE()),
+          [updated_at] = ISNULL([updated_at], GETDATE())
+      WHERE [status] IS NULL OR [created_at] IS NULL;
+
+      DELETE FROM [dbo].[sports]
+      WHERE ([sport_name] LIKE '%?%' OR [description] LIKE '%?%')
+        AND [sport_id] NOT IN (SELECT DISTINCT [sport_id] FROM [dbo].[courts] WHERE [sport_id] IS NOT NULL);
+    `);
+
+    // Khởi tạo danh mục môn thể thao mặc định nếu bảng đang trống
+    const countRes = await pool.request().query('SELECT COUNT(*) AS total FROM [dbo].[sports]');
+    if ((countRes.recordset[0]?.total || 0) === 0) {
+      await pool.request().query(`
+        INSERT INTO [dbo].[sports] ([sport_name], [description], [status], [created_at], [updated_at])
+        VALUES
+          (N'Bóng đá', N'Sân bóng đá cỏ nhân tạo 5 người, 7 người và 11 người', 'ACTIVE', GETDATE(), GETDATE()),
+          (N'Cầu lông', N'Sân cầu lông thảm PVC tiêu chuẩn thi đấu trong nhà', 'ACTIVE', GETDATE(), GETDATE()),
+          (N'Pickleball', N'Sân Pickleball mặt sơn Acrylic chống trượt có mái che', 'ACTIVE', GETDATE(), GETDATE()),
+          (N'Tennis', N'Sân quần vợt tiêu chuẩn có hệ thống đèn chiếu sáng ban đêm', 'ACTIVE', GETDATE(), GETDATE()),
+          (N'Bóng rổ', N'Sân bóng rổ 3x3 và 5x5 mặt sàn gỗ/sơn chuyên dụng', 'ACTIVE', GETDATE(), GETDATE()),
+          (N'Bóng chuyền', N'Sân bóng chuyền hơi và bóng chuyền da trong nhà', 'ACTIVE', GETDATE(), GETDATE());
+      `);
+    }
+
+    sportSchemaReady = true;
+  } catch (err) {
+    console.error('Cảnh báo đồng bộ schema bảng sports:', err.message);
+  }
+}
 
 /**
  * Lấy danh sách loại môn thể thao kèm số lượng sân đang sử dụng.
  * @param {{ search?: string, status?: string }} filters
  */
 export async function getAllSports(filters = {}) {
+  await ensureSportSchema();
   const pool = await getPool();
   const { search = '', status = 'ALL' } = filters;
 
@@ -60,6 +137,7 @@ export async function getAllSports(filters = {}) {
  * @param {number} sportId
  */
 export async function getSportById(sportId) {
+  await ensureSportSchema();
   const pool = await getPool();
   const result = await pool.request()
     .input('id', sportId)
@@ -91,6 +169,7 @@ export async function getSportById(sportId) {
  * @param {{ sportName: string, description?: string }} data
  */
 export async function createSport(data) {
+  await ensureSportSchema();
   const { sportName, description = '' } = data;
 
   if (!sportName || !sportName.trim()) {
@@ -127,6 +206,7 @@ export async function createSport(data) {
  * @param {{ sportName?: string, description?: string }} data
  */
 export async function updateSport(sportId, data) {
+  await ensureSportSchema();
   const { sportName, description } = data;
   const pool = await getPool();
 
@@ -175,6 +255,7 @@ export async function updateSport(sportId, data) {
  * @param {'ACTIVE' | 'INACTIVE'} status
  */
 export async function updateSportStatus(sportId, status) {
+  await ensureSportSchema();
   const normalizedStatus = (status || '').toUpperCase();
   if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
     throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);

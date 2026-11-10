@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+const bcrypt = (await import('bcrypt').catch(() => import('bcryptjs'))).default;
 import jwt from 'jsonwebtoken';
 import { getPool } from '../../core/config/db.js';
 import { AppError } from '../../core/errors/AppError.js';
