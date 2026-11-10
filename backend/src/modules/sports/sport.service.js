@@ -13,8 +13,9 @@ import { AppError } from '../../core/errors/AppError.js';
 let sportSchemaReady = false;
 
 /**
- * Đảm bảo bảng [sports] có đầy đủ các cột mở rộng (status, created_at, updated_at)
- * và dữ liệu môn thể thao mặc định.
+ * Đảm bảo bảng [sports] có đầy đủ các cột mở rộng (status, created_at, updated_at).
+ * Chỉ kiểm tra cấu trúc bảng/cột (DDL), KHÔNG tự động INSERT/UPDATE/DELETE dữ liệu khi chạy server.
+ * Dữ liệu mẫu được tách riêng sang script độc lập: `npm run seed:wbs31`
  */
 export async function ensureSportSchema() {
   if (sportSchemaReady) return;
@@ -49,42 +50,6 @@ export async function ensureSportSchema() {
         ALTER TABLE [dbo].[sports] ADD [updated_at] DATETIME DEFAULT GETDATE();
       END
     `);
-
-    // Xóa dữ liệu test bị lỗi font chữ '?' nếu có và chuẩn hóa status NULL -> 'ACTIVE'
-    await pool.request().query(`
-      UPDATE [dbo].[sports]
-      SET [status] = 'ACTIVE',
-          [created_at] = ISNULL([created_at], GETDATE()),
-          [updated_at] = ISNULL([updated_at], GETDATE())
-      WHERE [status] IS NULL OR [created_at] IS NULL;
-
-      DELETE FROM [dbo].[sports]
-      WHERE ([sport_name] LIKE '%?%' OR [description] LIKE '%?%')
-        AND [sport_id] NOT IN (SELECT DISTINCT [sport_id] FROM [dbo].[courts] WHERE [sport_id] IS NOT NULL);
-    `);
-
-    // Đảm bảo có đủ 6 môn thể thao tiêu chuẩn trong hệ thống
-    const defaultSports = [
-      { name: 'Bóng đá', desc: 'Sân bóng đá cỏ nhân tạo 5 người, 7 người và 11 người tiêu chuẩn thi đấu' },
-      { name: 'Cầu lông', desc: 'Sân cầu lông thảm PVC tiêu chuẩn thi đấu trong nhà, ánh sáng chống lóa' },
-      { name: 'Pickleball', desc: 'Sân Pickleball mặt sơn Acrylic chống trượt có mái che và ngoài trời' },
-      { name: 'Tennis', desc: 'Sân quần vợt mặt cứng tiêu chuẩn có hệ thống đèn chiếu sáng ban đêm' },
-      { name: 'Bóng rổ', desc: 'Sân bóng rổ 3x3 và 5x5 mặt sàn gỗ và sơn chuyên dụng tiêu chuẩn FIBA' },
-      { name: 'Bóng chuyền', desc: 'Sân bóng chuyền hơi và bóng chuyền da tiêu chuẩn thi đấu trong nhà' },
-    ];
-
-    for (const sp of defaultSports) {
-      await pool.request()
-        .input('name', sp.name)
-        .input('desc', sp.desc)
-        .query(`
-          IF NOT EXISTS (SELECT 1 FROM [dbo].[sports] WHERE LOWER(LTRIM(RTRIM([sport_name]))) = LOWER(@name))
-          BEGIN
-            INSERT INTO [dbo].[sports] ([sport_name], [description], [status], [created_at], [updated_at])
-            VALUES (@name, @desc, 'ACTIVE', GETDATE(), GETDATE());
-          END
-        `);
-    }
 
     sportSchemaReady = true;
   } catch (err) {

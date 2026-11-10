@@ -110,7 +110,16 @@ node test-db.js
 
 ### 📌 Chú thích 3 Tài khoản Chủ sân (`OWNER`) dùng để Test Quản lý Cơ sở, Sân con & Môn thể thao
 
-Khi khởi chạy Backend (`npm run dev`), hệ thống sẽ **tự động đồng bộ cấu trúc bảng** (`dbo.facilities`, `dbo.courts`, `dbo.sports`) và **khởi tạo sẵn 3 tài khoản Chủ sân độc lập** để cả nhóm dễ dàng kiểm thử phân quyền sở hữu và phân trang:
+Để dữ liệu trong Database **không bao giờ bị ghi đè lại mỗi khi khởi động lại Backend (`npm run dev`)**, phần nạp dữ liệu mẫu (3 tài khoản Chủ sân, Cơ sở & 18 sân con/owner) đã được **tách thành script chạy độc lập 1 lần duy nhất**:
+
+```bash
+cd backend
+npm run seed:wbs31
+```
+
+> 💡 **Lưu ý kiến trúc:**
+> - Khi chạy `npm run dev`, Backend **chỉ kiểm tra cấu trúc bảng/cột (DDL)** (`CREATE TABLE IF NOT EXISTS` / `ALTER TABLE`), **tuyệt đối không tự chạy `INSERT` / `UPDATE` / `DELETE` ghi đè dữ liệu**.
+> - Các sân gốc (`court_id` `0..9`) được giữ nguyên thuộc quyền sở hữu của `owner@sportlink.vn` để đồng bộ 100% với bảng phân công nhân viên (`dbo.court_staff`).
 
 - **Mật khẩu đăng nhập chung cho cả 3 tài khoản:** `password123`
 - **Trang đăng nhập:** `http://localhost:5173/login`
