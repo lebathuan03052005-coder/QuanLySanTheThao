@@ -3,11 +3,28 @@ import api from '../../shared/lib/axios';
 /**
  * ============================================================================
  * SPORTLINK - SPORT TYPE API CLIENT
- * Đặc tả WBS 3.1: Quản lý loại môn thể thao
+ * Đặc tả WBS 3.1 (S2-03): Quản lý loại môn thể thao (thiết kế mở rộng & chi tiết sân)
  * ============================================================================
  */
 
 export type SportStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface SportCourtDetail {
+  court_id: number;
+  sport_id: number;
+  court_name: string;
+  facility_id?: number | null;
+  facility_name: string;
+  address: string;
+  facility_status: string;
+  owner_id: number;
+  owner_name: string;
+  owner_email?: string;
+  capacity: number;
+  utilities?: string | null;
+  description?: string | null;
+  status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE' | 'CLOSED' | string;
+}
 
 export interface SportItem {
   sport_id: number;
@@ -15,6 +32,10 @@ export interface SportItem {
   description?: string | null;
   status: SportStatus;
   court_count?: number;
+  active_court_count?: number;
+  inactive_court_count?: number;
+  facility_count?: number;
+  courts?: SportCourtDetail[];
   created_at?: string;
   updated_at?: string;
 }
@@ -36,7 +57,7 @@ export interface ApiResponse<T> {
 }
 
 /**
- * Lấy danh sách toàn bộ loại môn thể thao trong hệ thống.
+ * Lấy danh sách toàn bộ loại môn thể thao kèm chi tiết các sân con thuộc từng môn.
  */
 export async function getAllSportsApi(params?: {
   search?: string;
@@ -47,7 +68,7 @@ export async function getAllSportsApi(params?: {
 }
 
 /**
- * Lấy chi tiết một môn thể thao.
+ * Lấy chi tiết một môn thể thao kèm danh sách sân con.
  */
 export async function getSportByIdApi(id: number): Promise<SportItem> {
   const res = await api.get<ApiResponse<SportItem>>(`/sports/${id}`);
@@ -83,4 +104,3 @@ export async function updateSportStatusApi(
   const res = await api.patch<ApiResponse<SportItem>>(`/sports/${id}/status`, { status });
   return res.data.data;
 }
-

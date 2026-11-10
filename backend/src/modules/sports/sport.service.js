@@ -4,9 +4,9 @@ import { AppError } from '../../core/errors/AppError.js';
 /**
  * ============================================================================
  * SPORTLINK - SPORT TYPE MANAGEMENT SERVICE
- * Đáp ứng đặc tả chức năng WBS 3.1 (S2-03): Quản lý loại môn thể thao
- * Tự động đồng bộ schema bảng [sports] khi khởi chạy để không bao giờ lỗi 500
- * khi các thành viên trong nhóm pull code về máy mới.
+ * Đáp ứng đặc tả chức năng WBS 3.1 (S2-03): Quản lý loại môn thể thao (thiết kế mở rộng)
+ * Trả về chi tiết từng môn thể thao kèm danh sách đầy đủ các sân con, cơ sở sân,
+ * chủ sân quản lý và trạng thái hoạt động chi tiết của từng sân.
  * ============================================================================
  */
 
@@ -63,19 +63,27 @@ export async function ensureSportSchema() {
         AND [sport_id] NOT IN (SELECT DISTINCT [sport_id] FROM [dbo].[courts] WHERE [sport_id] IS NOT NULL);
     `);
 
-    // Khởi tạo danh mục môn thể thao mặc định nếu bảng đang trống
-    const countRes = await pool.request().query('SELECT COUNT(*) AS total FROM [dbo].[sports]');
-    if ((countRes.recordset[0]?.total || 0) === 0) {
-      await pool.request().query(`
-        INSERT INTO [dbo].[sports] ([sport_name], [description], [status], [created_at], [updated_at])
-        VALUES
-          (N'Bóng đá', N'Sân bóng đá cỏ nhân tạo 5 người, 7 người và 11 người', 'ACTIVE', GETDATE(), GETDATE()),
-          (N'Cầu lông', N'Sân cầu lông thảm PVC tiêu chuẩn thi đấu trong nhà', 'ACTIVE', GETDATE(), GETDATE()),
-          (N'Pickleball', N'Sân Pickleball mặt sơn Acrylic chống trượt có mái che', 'ACTIVE', GETDATE(), GETDATE()),
-          (N'Tennis', N'Sân quần vợt tiêu chuẩn có hệ thống đèn chiếu sáng ban đêm', 'ACTIVE', GETDATE(), GETDATE()),
-          (N'Bóng rổ', N'Sân bóng rổ 3x3 và 5x5 mặt sàn gỗ/sơn chuyên dụng', 'ACTIVE', GETDATE(), GETDATE()),
-          (N'Bóng chuyền', N'Sân bóng chuyền hơi và bóng chuyền da trong nhà', 'ACTIVE', GETDATE(), GETDATE());
-      `);
+    // Đảm bảo có đủ 6 môn thể thao tiêu chuẩn trong hệ thống
+    const defaultSports = [
+      { name: 'Bóng đá', desc: 'Sân bóng đá cỏ nhân tạo 5 người, 7 người và 11 người tiêu chuẩn thi đấu' },
+      { name: 'Cầu lông', desc: 'Sân cầu lông thảm PVC tiêu chuẩn thi đấu trong nhà, ánh sáng chống lóa' },
+      { name: 'Pickleball', desc: 'Sân Pickleball mặt sơn Acrylic chống trượt có mái che và ngoài trời' },
+      { name: 'Tennis', desc: 'Sân quần vợt mặt cứng tiêu chuẩn có hệ thống đèn chiếu sáng ban đêm' },
+      { name: 'Bóng rổ', desc: 'Sân bóng rổ 3x3 và 5x5 mặt sàn gỗ và sơn chuyên dụng tiêu chuẩn FIBA' },
+      { name: 'Bóng chuyền', desc: 'Sân bóng chuyền hơi và bóng chuyền da tiêu chuẩn thi đấu trong nhà' },
+    ];
+
+    for (const sp of defaultSports) {
+      await pool.request()
+        .input('name', sp.name)
+        .input('desc', sp.desc)
+        .query(`
+          IF NOT EXISTS (SELECT 1 FROM [dbo].[sports] WHERE LOWER(LTRIM(RTRIM([sport_name]))) = LOWER(@name))
+          BEGIN
+            INSERT INTO [dbo].[sports] ([sport_name], [description], [status], [created_at], [updated_at])
+            VALUES (@name, @desc, 'ACTIVE', GETDATE(), GETDATE());
+          END
+        `);
     }
 
     sportSchemaReady = true;
@@ -85,7 +93,7 @@ export async function ensureSportSchema() {
 }
 
 /**
- * Lấy danh sách loại môn thể thao kèm số lượng sân đang sử dụng.
+ * Lấy danh sách loại môn thể thao kèm chi tiết tất cả các sân con (thuộc cơ sở nào, chủ sân nào, trạng thái hoạt động ra sao).
  * @param {{ search?: string, status?: string }} filters
  */
 export async function getAllSports(filters = {}) {
@@ -100,10 +108,8 @@ export async function getAllSports(filters = {}) {
       s.description,
       COALESCE(s.status, 'ACTIVE') AS status,
       s.created_at,
-      s.updated_at,
-      COUNT(c.court_id) AS court_count
+      s.updated_at
     FROM sports s
-    LEFT JOIN courts c ON s.sport_id = c.sport_id
     WHERE 1=1
   `;
 
@@ -115,10 +121,7 @@ export async function getAllSports(filters = {}) {
     query += ` AND (s.sport_name LIKE @search OR s.description LIKE @search)`;
   }
 
-  query += `
-    GROUP BY s.sport_id, s.sport_name, s.description, s.status, s.created_at, s.updated_at
-    ORDER BY s.sport_id ASC
-  `;
+  query += ` ORDER BY s.sport_id ASC`;
 
   const request = pool.request();
   if (status && status !== 'ALL') {
@@ -128,35 +131,84 @@ export async function getAllSports(filters = {}) {
     request.input('search', `%${search.trim()}%`);
   }
 
-  const result = await request.query(query);
-  return result.recordset;
+  const sportsResult = await request.query(query);
+  const sportsList = sportsResult.recordset;
+
+  // Lấy toàn bộ danh sách sân con kèm thông tin cơ sở và chủ sân để gắn chi tiết vào từng môn thể thao
+  let courtsList = [];
+  try {
+    const courtsRes = await pool.request().query(`
+      SELECT 
+        c.court_id,
+        c.sport_id,
+        c.court_name,
+        c.facility_id,
+        ISNULL(f.name, N'Cơ sở độc lập') AS facility_name,
+        ISNULL(f.address, c.address) AS address,
+        ISNULL(f.status, 'ACTIVE') AS facility_status,
+        c.owner_id,
+        ISNULL(u.full_name, N'Chủ sân SportLink') AS owner_name,
+        ISNULL(u.email, '') AS owner_email,
+        ISNULL(c.capacity, 10) AS capacity,
+        c.utilities,
+        c.description,
+        ISNULL(c.status, 'ACTIVE') AS status
+      FROM courts c
+      LEFT JOIN facilities f ON c.facility_id = f.facility_id
+      LEFT JOIN users u ON c.owner_id = u.user_id
+      ORDER BY c.facility_id ASC, c.court_id ASC
+    `);
+    courtsList = courtsRes.recordset;
+  } catch {
+    // Fallback nếu bảng facilities chưa được khởi tạo
+    const fallbackRes = await pool.request().query(`
+      SELECT 
+        c.court_id,
+        c.sport_id,
+        c.court_name,
+        NULL AS facility_id,
+        N'Cơ sở độc lập' AS facility_name,
+        c.address,
+        'ACTIVE' AS facility_status,
+        c.owner_id,
+        N'Chủ sân SportLink' AS owner_name,
+        '' AS owner_email,
+        10 AS capacity,
+        c.utilities,
+        c.description,
+        ISNULL(c.status, 'ACTIVE') AS status
+      FROM courts c
+      ORDER BY c.court_id ASC
+    `);
+    courtsList = fallbackRes.recordset;
+  }
+
+  return sportsList.map((sp) => {
+    const appliedCourts = courtsList.filter((c) => c.sport_id === sp.sport_id);
+    const activeCourts = appliedCourts.filter((c) => (c.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+    const inactiveCourts = appliedCourts.filter((c) => (c.status || 'ACTIVE').toUpperCase() !== 'ACTIVE');
+    const uniqueFacilities = new Set(
+      appliedCourts.map((c) => c.facility_id || c.facility_name).filter(Boolean)
+    );
+
+    return {
+      ...sp,
+      court_count: appliedCourts.length,
+      active_court_count: activeCourts.length,
+      inactive_court_count: inactiveCourts.length,
+      facility_count: uniqueFacilities.size,
+      courts: appliedCourts,
+    };
+  });
 }
 
 /**
- * Lấy chi tiết một môn thể thao theo ID.
+ * Lấy chi tiết một môn thể thao theo ID kèm danh sách sân con.
  * @param {number} sportId
  */
 export async function getSportById(sportId) {
-  await ensureSportSchema();
-  const pool = await getPool();
-  const result = await pool.request()
-    .input('id', sportId)
-    .query(`
-      SELECT 
-        s.sport_id,
-        s.sport_name,
-        s.description,
-        COALESCE(s.status, 'ACTIVE') AS status,
-        s.created_at,
-        s.updated_at,
-        COUNT(c.court_id) AS court_count
-      FROM sports s
-      LEFT JOIN courts c ON s.sport_id = c.sport_id
-      WHERE s.sport_id = @id
-      GROUP BY s.sport_id, s.sport_name, s.description, s.status, s.created_at, s.updated_at
-    `);
-
-  const sport = result.recordset[0];
+  const all = await getAllSports();
+  const sport = all.find((s) => s.sport_id === sportId);
   if (!sport) {
     throw new AppError('Không tìm thấy môn thể thao này.', 404);
   }
@@ -197,7 +249,15 @@ export async function createSport(data) {
       VALUES (@sportName, @description, 'ACTIVE', GETDATE(), GETDATE())
     `);
 
-  return result.recordset[0];
+  const inserted = result.recordset[0];
+  return {
+    ...inserted,
+    court_count: 0,
+    active_court_count: 0,
+    inactive_court_count: 0,
+    facility_count: 0,
+    courts: [],
+  };
 }
 
 /**
@@ -218,7 +278,6 @@ export async function updateSport(sportId, data) {
     }
 
     const cleanName = sportName.trim();
-    // Kiểm tra trùng tên với môn thể thao khác
     const duplicate = await pool.request()
       .input('id', sportId)
       .input('sportName', cleanName)
@@ -232,7 +291,7 @@ export async function updateSport(sportId, data) {
     }
   }
 
-  const result = await pool.request()
+  await pool.request()
     .input('id', sportId)
     .input('sportName', sportName ? sportName.trim() : null)
     .input('description', description !== undefined ? description.trim() : null)
@@ -242,11 +301,10 @@ export async function updateSport(sportId, data) {
         sport_name = COALESCE(@sportName, sport_name),
         description = COALESCE(@description, description),
         updated_at = GETDATE()
-      OUTPUT INSERTED.*
       WHERE sport_id = @id
     `);
 
-  return result.recordset[0];
+  return await getSportById(sportId);
 }
 
 /**
@@ -264,15 +322,14 @@ export async function updateSportStatus(sportId, status) {
   await getSportById(sportId);
 
   const pool = await getPool();
-  const result = await pool.request()
+  await pool.request()
     .input('id', sportId)
     .input('status', normalizedStatus)
     .query(`
       UPDATE sports
       SET status = @status, updated_at = GETDATE()
-      OUTPUT INSERTED.*
       WHERE sport_id = @id
     `);
 
-  return result.recordset[0];
+  return await getSportById(sportId);
 }

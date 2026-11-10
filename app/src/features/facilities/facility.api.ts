@@ -3,12 +3,22 @@ import api from '../../shared/lib/axios';
 /**
  * ============================================================================
  * SPORTLINK - FACILITY & COURT API CLIENT
- * Đặc tả WBS 3.1: Quản lý cơ sở sân & danh sách sân con
+ * Đặc tả WBS 3.1 (S2-02): Quản lý cơ sở sân & danh sách sân con
  * ============================================================================
  */
 
 export type FacilityStatus = 'ACTIVE' | 'INACTIVE';
 export type CourtStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface FacilityCourtPreview {
+  court_id: number;
+  facility_id: number;
+  court_name: string;
+  sport_id: number;
+  sport_name: string;
+  capacity?: number;
+  status: CourtStatus;
+}
 
 export interface FacilityItem {
   facility_id: number;
@@ -20,6 +30,7 @@ export interface FacilityItem {
   status: FacilityStatus;
   total_courts: number;
   active_courts: number;
+  courts_preview?: FacilityCourtPreview[];
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +38,7 @@ export interface FacilityItem {
 export interface CourtItem {
   court_id: number;
   facility_id: number;
+  facility_name?: string;
   owner_id: number;
   sport_id: number;
   sport_name?: string;
@@ -80,7 +92,7 @@ export interface ApiResponse<T> {
 }
 
 /**
- * Lấy danh sách cơ sở sân do OWNER quản lý.
+ * Lấy danh sách cơ sở sân do OWNER quản lý kèm tóm tắt sân con trực thuộc.
  */
 export async function getOwnerFacilitiesApi(params?: {
   search?: string;
@@ -175,4 +187,3 @@ export async function updateCourtStatusApi(
   });
   return res.data.data;
 }
-
