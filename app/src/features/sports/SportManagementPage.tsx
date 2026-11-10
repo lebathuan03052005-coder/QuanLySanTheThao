@@ -12,68 +12,102 @@ import { useNavigate } from 'react-router';
 import { useAuthStore } from '../../shared/stores/authStore';
 
 /**
- * Nhận diện biểu tượng và tông màu trực quan cho từng loại môn thể thao
+ * Chuẩn hóa chuỗi tiện ích từ database (hỗ trợ cả mảng JSON ["A", "B"] lẫn chuỗi "A, B")
+ */
+function parseUtilities(raw?: string | null): string[] {
+  if (!raw || !raw.trim()) return [];
+  const trimmed = raw.trim();
+
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => String(item).replace(/^[\s"'[\]]+|[\s"'[\]]+$/g, '').trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  return trimmed
+    .replace(/[\[\]"]/g, '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Nhận diện tông màu trực quan cho từng loại môn thể thao
  */
 function getSportTheme(sportName: string) {
   const lower = (sportName || '').toLowerCase();
   if (lower.includes('bóng đá') || lower.includes('futsal')) {
     return {
-      icon: '⚽',
+      code: 'BD',
       badgeBg: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      headerBg: 'from-emerald-500/10 via-teal-500/5 to-transparent',
+      iconBox: 'bg-emerald-600 text-white',
+      headerBg: 'from-emerald-50/70 via-white to-white',
       accentBorder: 'border-l-4 border-l-emerald-500',
       standardNote: 'Sân 5 / Sân 7 / Sân 11 người',
     };
   }
   if (lower.includes('cầu lông')) {
     return {
-      icon: '🏸',
+      code: 'CL',
       badgeBg: 'bg-cyan-50 text-cyan-700 border-cyan-200',
-      headerBg: 'from-cyan-500/10 via-sky-500/5 to-transparent',
+      iconBox: 'bg-cyan-600 text-white',
+      headerBg: 'from-cyan-50/70 via-white to-white',
       accentBorder: 'border-l-4 border-l-cyan-500',
       standardNote: 'Sân thảm PVC trong nhà tiêu chuẩn',
     };
   }
   if (lower.includes('pickleball')) {
     return {
-      icon: '🏓',
+      code: 'PK',
       badgeBg: 'bg-blue-50 text-blue-700 border-blue-200',
-      headerBg: 'from-blue-500/10 via-indigo-500/5 to-transparent',
+      iconBox: 'bg-blue-600 text-white',
+      headerBg: 'from-blue-50/70 via-white to-white',
       accentBorder: 'border-l-4 border-l-blue-500',
       standardNote: 'Sân mặt Acrylic chuẩn USAPA',
     };
   }
   if (lower.includes('tennis') || lower.includes('quần vợt')) {
     return {
-      icon: '🎾',
+      code: 'TN',
       badgeBg: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-      headerBg: 'from-indigo-500/10 via-violet-500/5 to-transparent',
+      iconBox: 'bg-indigo-600 text-white',
+      headerBg: 'from-indigo-50/70 via-white to-white',
       accentBorder: 'border-l-4 border-l-indigo-500',
       standardNote: 'Sân mặt cứng Hard Court tiêu chuẩn',
     };
   }
   if (lower.includes('bóng rổ')) {
     return {
-      icon: '🏀',
+      code: 'BR',
       badgeBg: 'bg-amber-50 text-amber-700 border-amber-200',
-      headerBg: 'from-amber-500/10 via-orange-500/5 to-transparent',
+      iconBox: 'bg-amber-600 text-white',
+      headerBg: 'from-amber-50/70 via-white to-white',
       accentBorder: 'border-l-4 border-l-amber-500',
       standardNote: 'Sân 5x5 nguyên sân & 3x3 nửa sân',
     };
   }
   if (lower.includes('bóng chuyền')) {
     return {
-      icon: '🏐',
+      code: 'BC',
       badgeBg: 'bg-purple-50 text-purple-700 border-purple-200',
-      headerBg: 'from-purple-500/10 via-fuchsia-500/5 to-transparent',
+      iconBox: 'bg-purple-600 text-white',
+      headerBg: 'from-purple-50/70 via-white to-white',
       accentBorder: 'border-l-4 border-l-purple-500',
       standardNote: 'Sân 6x6 tiêu chuẩn trong nhà / ngoài trời',
     };
   }
   return {
-    icon: '🏟️',
-    badgeBg: 'bg-slate-100 text-slate-700 border-slate-200',
-    headerBg: 'from-slate-500/10 via-slate-500/5 to-transparent',
+    code: 'SP',
+    badgeBg: 'bg-teal-50 text-teal-700 border-teal-200',
+    iconBox: 'bg-teal-600 text-white',
+    headerBg: 'from-teal-50/70 via-white to-white',
     accentBorder: 'border-l-4 border-l-teal-500',
     standardNote: 'Môn thể thao mở rộng trên hệ thống',
   };
@@ -83,23 +117,20 @@ function getCourtStatusBadge(status: string) {
   const normalized = (status || 'ACTIVE').toUpperCase();
   if (normalized === 'ACTIVE') {
     return {
-      label: 'Đang hoạt động (Nhận đặt sân)',
-      shortLabel: 'Đang hoạt động',
+      label: 'Đang mở đặt sân',
       dotClass: 'bg-emerald-500 animate-pulse',
       badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     };
   }
   if (normalized === 'MAINTENANCE') {
     return {
-      label: 'Đang bảo trì kỹ thuật',
-      shortLabel: 'Bảo trì',
+      label: 'Đang bảo trì',
       dotClass: 'bg-amber-500',
       badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',
     };
   }
   return {
-    label: 'Ngừng hoạt động (Tạm đóng)',
-    shortLabel: 'Ngừng hoạt động',
+    label: 'Tạm đóng',
     dotClass: 'bg-slate-400',
     badgeClass: 'bg-slate-100 text-slate-600 border-slate-300',
   };
@@ -220,12 +251,10 @@ export default function SportManagementPage() {
         const matchStatus = statusFilter === 'ALL' || sport.status === statusFilter;
         if (!matchStatus) return false;
 
-        // Nếu đang lọc chỉ sân của tôi, vẫn hiện môn nếu có sân của tôi hoặc nếu môn mới tạo chưa có sân
         if (scopeFilter === 'MINE' && sport.filteredCourts.length === 0 && (sport.courts?.length || 0) > 0) {
           return false;
         }
 
-        // Nếu có từ khóa tìm kiếm, hiển thị môn nếu tên môn khớp HOẶC có sân con/cơ sở khớp từ khóa
         if (searchTerm.trim()) {
           return sport.matchSportSelf || sport.filteredCourts.length > 0;
         }
@@ -327,11 +356,11 @@ export default function SportManagementPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col gap-5 min-h-[calc(100vh-2rem)]">
+    <div className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
       {/* Toast thông báo */}
       {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2 px-5 py-3.5 bg-emerald-600 text-white rounded-2xl shadow-2xl animate-fade-in font-medium text-sm">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="fixed top-5 right-5 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl animate-fade-in font-semibold text-xs">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
           <span>{toastMsg}</span>
@@ -340,97 +369,101 @@ export default function SportManagementPage() {
 
       {/* Thông báo lỗi nếu có */}
       {errorMsg && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-2xl">
+        <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-2xl">
           {errorMsg}
         </div>
       )}
 
-      {/* 1. Header Card: Tiêu đề & Nút thao tác */}
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 md:p-7 rounded-3xl border border-slate-200/80 shadow-md">
-        <div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
-              Quản Lý Loại Môn Thể Thao & Chi Tiết Sân Áp Dụng
-            </h1>
-            <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
-              WBS 3.1 (S2-03)
-            </span>
+      {/* 1. THANH ĐIỀU KHIỂN TRUNG TÂM GỌN GÀNG (Gộp Header + KPI Strip) */}
+      <div className="shrink-0 bg-white rounded-3xl border border-slate-200/80 shadow-sm p-5 flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 pb-4 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight">
+                Danh Mục Loại Môn Thể Thao & Chi Tiết Sân Áp Dụng
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200">
+                WBS 3.1
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Theo dõi chi tiết từng môn thể thao có những sân con nào, thuộc cơ sở nào và trạng thái vận hành thực tế
+            </p>
           </div>
-          <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-            Quản lý danh mục môn thể thao và theo dõi chi tiết từng sân con thuộc cơ sở nào, chủ sân nào quản lý và trạng thái vận hành thực tế
-          </p>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => navigate('/owner/courts')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span>Quản lý Cơ sở & Sân con</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenCreateModal}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>Thêm môn thể thao mới</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => navigate('/owner/courts')}
-            className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-2xl transition-all cursor-pointer"
-          >
-            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            <span>Về Quản lý cơ sở sân</span>
-          </button>
+        {/* 4 Thẻ KPI Gọn Gàng */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Tổng danh mục môn
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {stats.active} mở • {stats.inactive} khóa
+              </span>
+            </div>
+            <span className="text-2xl font-black text-slate-900">{stats.total}</span>
+          </div>
 
-          <button
-            type="button"
-            onClick={handleOpenCreateModal}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-sm font-semibold rounded-2xl shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all cursor-pointer shrink-0"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            <span>Thêm môn thể thao mới</span>
-          </button>
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-50/50 border border-emerald-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">
+                Môn đang hoạt động
+              </span>
+              <span className="text-[11px] text-emerald-600/80">Cho phép tạo sân mới</span>
+            </div>
+            <span className="text-2xl font-black text-emerald-600">{stats.active}</span>
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-blue-50/50 border border-blue-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider block">
+                Cụm cơ sở triển khai
+              </span>
+              <span className="text-[11px] text-blue-600/80">Địa điểm đang vận hành</span>
+            </div>
+            <span className="text-2xl font-black text-blue-600">{stats.totalFacilities}</span>
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-teal-50/50 border border-teal-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-teal-700 uppercase tracking-wider block">
+                Tổng sân áp dụng
+              </span>
+              <span className="text-[11px] text-teal-600/80">{stats.activeCourts} sân đang mở</span>
+            </div>
+            <span className="text-2xl font-black text-teal-600">{stats.totalCourts}</span>
+          </div>
         </div>
       </div>
 
-      {/* 2. Thẻ KPI Thống kê chi tiết */}
-      <div className="shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-            Tổng danh mục môn
-          </span>
-          <div className="text-3xl font-black text-slate-900 mt-2">{stats.total}</div>
-          <span className="text-xs text-slate-400 mt-1 block">
-            {stats.active} môn đang mở • {stats.inactive} môn khóa
-          </span>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Môn đang hoạt động
-            </span>
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          </div>
-          <div className="text-3xl font-black text-emerald-600 mt-2">{stats.active}</div>
-          <span className="text-xs text-slate-400 mt-1 block">Cho phép tạo sân con & đặt lịch</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-            Cụm cơ sở triển khai
-          </span>
-          <div className="text-3xl font-black text-blue-600 mt-2">{stats.totalFacilities}</div>
-          <span className="text-xs text-slate-400 mt-1 block">Cơ sở sân đang vận hành các môn</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-            Tổng sân con áp dụng
-          </span>
-          <div className="text-3xl font-black text-teal-600 mt-2">
-            {stats.activeCourts}{' '}
-            <span className="text-base font-bold text-slate-400">/ {stats.totalCourts} sân</span>
-          </div>
-          <span className="text-xs text-slate-400 mt-1 block">Sân đang mở hoạt động trên hệ thống</span>
-        </div>
-      </div>
-
-      {/* 3. Thanh tìm kiếm, Bộ lọc chi tiết & Tùy chọn hiển thị */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+      {/* 2. Thanh tìm kiếm, Bộ lọc chi tiết & Tùy chọn hiển thị */}
+      <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
         <div className="relative flex-1 max-w-xl">
           <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -442,11 +475,11 @@ export default function SportManagementPage() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Tìm theo tên môn, tên sân con (Sân 1, Sân 2...), tên cơ sở hoặc địa chỉ..."
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-800 placeholder-slate-400"
+            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-800 placeholder-slate-400"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Lọc phạm vi sân */}
           <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
             <button
@@ -454,7 +487,7 @@ export default function SportManagementPage() {
               onClick={() => setScopeFilter('ALL')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 scopeFilter === 'ALL'
-                  ? 'bg-white text-emerald-700 shadow-sm'
+                  ? 'bg-white text-emerald-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -465,7 +498,7 @@ export default function SportManagementPage() {
               onClick={() => setScopeFilter('MINE')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 scopeFilter === 'MINE'
-                  ? 'bg-white text-emerald-700 shadow-sm'
+                  ? 'bg-white text-emerald-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -473,7 +506,6 @@ export default function SportManagementPage() {
             </button>
           </div>
 
-          {/* Lọc trạng thái môn */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -485,7 +517,6 @@ export default function SportManagementPage() {
             <option value="INACTIVE">Môn: Ngừng hoạt động</option>
           </select>
 
-          {/* Lọc trạng thái sân con */}
           <select
             value={courtStatusFilter}
             onChange={(e) => setCourtStatusFilter(e.target.value)}
@@ -493,46 +524,44 @@ export default function SportManagementPage() {
             className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
           >
             <option value="ALL">Sân con: Tất cả trạng thái</option>
-            <option value="ACTIVE">Sân con: Đang mở hoạt động</option>
-            <option value="INACTIVE">Sân con: Đang tạm đóng</option>
+            <option value="ACTIVE">Sân con: Đang mở</option>
+            <option value="INACTIVE">Sân con: Đang đóng</option>
           </select>
 
-          {/* Số môn mỗi trang */}
           <select
             value={sportsPerPage}
             onChange={(e) => setSportsPerPage(Number(e.target.value))}
             aria-label="Số môn hiển thị trên mỗi trang"
             className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
           >
-            <option value={2}>Hiển thị: 2 môn / trang</option>
-            <option value={4}>Hiển thị: 4 môn / trang</option>
-            <option value={6}>Hiển thị: 6 môn / trang</option>
+            <option value={2}>2 môn / trang</option>
+            <option value={4}>4 môn / trang</option>
+            <option value={6}>6 môn / trang</option>
           </select>
         </div>
       </div>
 
-      {/* 4. Danh sách chi tiết từng môn thể thao và bảng các sân con trực thuộc */}
-      <div className="flex flex-col gap-5">
+      {/* 3. Danh sách chi tiết từng môn thể thao và bảng các sân con trực thuộc */}
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
-          <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+          <h2 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
             Danh mục môn thể thao & Sân trực thuộc ({processedSports.length} môn)
           </h2>
           <span className="text-xs text-slate-500">
-            Trang <strong>{currentPage}</strong> / <strong>{totalPages}</strong> (Hiển thị{' '}
-            {paginatedSports.length} môn trên trang này)
+            Trang <strong>{currentPage}</strong> / <strong>{totalPages}</strong>
           </span>
         </div>
 
         {loading ? (
-          <div className="p-12 bg-white rounded-3xl border border-slate-200/80 text-center text-slate-400">
+          <div className="p-12 bg-white rounded-3xl border border-slate-200/80 text-center text-slate-400 text-sm">
             Đang tải danh mục môn thể thao và chi tiết các sân trực thuộc...
           </div>
         ) : paginatedSports.length === 0 ? (
-          <div className="p-12 bg-white rounded-3xl border border-dashed border-slate-300 text-center text-slate-500">
+          <div className="p-12 bg-white rounded-3xl border border-dashed border-slate-300 text-center text-slate-500 text-xs">
             Không tìm thấy môn thể thao hoặc sân con nào phù hợp với bộ lọc hiện tại.
           </div>
         ) : (
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-4">
             {paginatedSports.map((sport) => {
               const isActive = sport.status === 'ACTIVE';
               const theme = getSportTheme(sport.sport_name);
@@ -545,7 +574,6 @@ export default function SportManagementPage() {
                 filteredCourts.map((c) => c.facility_id).filter(Boolean)
               ).size;
 
-              // Phân trang con cho danh sách sân của môn này
               const cPage = getSportCourtPage(sport.sport_id);
               const totalCourtPages = Math.max(
                 1,
@@ -560,24 +588,26 @@ export default function SportManagementPage() {
               return (
                 <div
                   key={sport.sport_id}
-                  className={`bg-white rounded-3xl border border-slate-200/90 shadow-md overflow-hidden transition-all ${theme.accentBorder}`}
+                  className={`bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all ${theme.accentBorder}`}
                 >
                   {/* Phần đầu của Môn thể thao */}
                   <div
-                    className={`p-5 md:p-6 bg-gradient-to-r ${theme.headerBg} border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4`}
+                    className={`p-4 md:p-5 bg-gradient-to-r ${theme.headerBg} border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4`}
                   >
-                    <div className="flex items-start gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center text-3xl shrink-0">
-                        {theme.icon}
+                    <div className="flex items-start gap-3.5">
+                      <div
+                        className={`w-11 h-11 rounded-2xl ${theme.iconBox} shadow-xs flex items-center justify-center text-sm font-black tracking-tight shrink-0`}
+                      >
+                        {theme.code}
                       </div>
 
                       <div>
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <h3 className="text-xl font-extrabold text-slate-900">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-lg font-extrabold text-slate-900">
                             {sport.sport_name}
                           </h3>
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
                               isActive
                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : 'bg-slate-200 text-slate-700 border-slate-300'
@@ -586,51 +616,49 @@ export default function SportManagementPage() {
                             {isActive ? 'Đang mở hoạt động' : 'Đã ngừng hoạt động'}
                           </span>
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${theme.badgeBg}`}
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${theme.badgeBg}`}
                           >
                             {theme.standardNote}
                           </span>
-                          <span className="text-xs font-mono text-slate-400">
-                            Mã môn: #{sport.sport_id}
+                          <span className="text-[11px] font-mono text-slate-400">
+                            Mã môn #{sport.sport_id}
                           </span>
                         </div>
 
-                        <p className="text-xs md:text-sm text-slate-600 mt-1.5 leading-relaxed max-w-3xl">
+                        <p className="text-xs text-slate-600 mt-1 leading-relaxed max-w-3xl">
                           {sport.description || 'Chưa có mô tả chi tiết cho loại môn thể thao này.'}
                         </p>
                       </div>
                     </div>
 
                     {/* Khối thống kê nhanh của môn & Nút hành động */}
-                    <div className="flex flex-col sm:flex-row lg:flex-col xl:flex-row items-start sm:items-center gap-3 shrink-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-xs text-xs">
-                          <span className="text-slate-500">Tổng sân: </span>
-                          <strong className="text-slate-900">{filteredCourts.length} sân</strong>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                        <span className="text-slate-500">Tổng: </span>
+                        <strong className="text-slate-900">{filteredCourts.length} sân</strong>
+                      </div>
+                      <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
+                        <span className="text-emerald-700">Đang mở: </span>
+                        <strong className="text-emerald-800">{activeCourtsInSport}</strong>
+                      </div>
+                      {inactiveCourtsInSport > 0 && (
+                        <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+                          <span className="text-amber-700">Đóng: </span>
+                          <strong className="text-amber-800">{inactiveCourtsInSport}</strong>
                         </div>
-                        <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
-                          <span className="text-emerald-700">Đang hoạt động: </span>
-                          <strong className="text-emerald-800">{activeCourtsInSport}</strong>
-                        </div>
-                        {inactiveCourtsInSport > 0 && (
-                          <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs">
-                            <span className="text-amber-700">Tạm đóng/Bảo trì: </span>
-                            <strong className="text-amber-800">{inactiveCourtsInSport}</strong>
-                          </div>
-                        )}
-                        <div className="px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs">
-                          <span className="text-blue-700">Cơ sở: </span>
-                          <strong className="text-blue-800">{uniqueFacilitiesCount} cụm sân</strong>
-                        </div>
+                      )}
+                      <div className="px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs">
+                        <span className="text-blue-700">Cơ sở: </span>
+                        <strong className="text-blue-800">{uniqueFacilitiesCount} cụm</strong>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 ml-1">
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(sport)}
-                          className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                          className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
                         >
-                          Chỉnh sửa môn
+                          Sửa môn
                         </button>
                         <button
                           type="button"
@@ -640,43 +668,23 @@ export default function SportManagementPage() {
                               targetStatus: isActive ? 'INACTIVE' : 'ACTIVE',
                             })
                           }
-                          className={`px-3.5 py-2 text-xs font-bold rounded-xl border transition-colors cursor-pointer ${
+                          className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-colors cursor-pointer ${
                             isActive
                               ? 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
                               : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
                           }`}
                         >
-                          {isActive ? 'Ngừng hoạt động' : 'Kích hoạt lại'}
+                          {isActive ? 'Khóa môn' : 'Mở lại'}
                         </button>
                       </div>
                     </div>
                   </div>
 
                   {/* Phần thân: Bảng chi tiết các sân con thuộc môn thể thao này */}
-                  <div className="p-5 md:p-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                        <span>Danh sách chi tiết các sân thuộc môn {sport.sport_name}</span>
-                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
-                          {filteredCourts.length} sân
-                        </span>
-                      </h4>
-
-                      <button
-                        type="button"
-                        onClick={() => navigate('/owner/courts')}
-                        className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>+ Quản lý / Thêm sân con tại mục Cơ sở sân</span>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    </div>
-
+                  <div className="p-4 md:p-5">
                     {filteredCourts.length === 0 ? (
-                      <div className="py-8 px-4 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-500 text-xs">
-                        Hiện chưa có sân con nào thuộc môn <strong>{sport.sport_name}</strong> trong phạm vi lọc này. Bạn có thể vào mục <strong>Quản lý cơ sở sân</strong> để thêm sân con mới cho môn này.
+                      <div className="py-6 px-4 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-500 text-xs">
+                        Hiện chưa có sân con nào thuộc môn <strong>{sport.sport_name}</strong> trong phạm vi lọc này.
                       </div>
                     ) : (
                       <>
@@ -695,6 +703,7 @@ export default function SportManagementPage() {
                               {paginatedCourts.map((court) => {
                                 const statusBadge = getCourtStatusBadge(court.status);
                                 const mine = isMyCourt(court);
+                                const cleanUtils = parseUtilities(court.utilities);
 
                                 return (
                                   <tr
@@ -702,7 +711,7 @@ export default function SportManagementPage() {
                                     className="hover:bg-slate-50/80 transition-colors"
                                   >
                                     {/* Cột 1: Tên sân con */}
-                                    <td className="py-3.5 px-4 align-top">
+                                    <td className="py-3 px-4 align-top">
                                       <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
                                         <span>{court.court_name}</span>
                                         <span className="text-[11px] font-mono text-slate-400 font-normal">
@@ -710,79 +719,60 @@ export default function SportManagementPage() {
                                         </span>
                                       </div>
                                       {court.description && (
-                                        <p className="text-slate-500 mt-1 line-clamp-1">
+                                        <p className="text-slate-500 mt-0.5 line-clamp-1">
                                           {court.description}
                                         </p>
                                       )}
                                     </td>
 
                                     {/* Cột 2: Cơ sở sân & Địa chỉ */}
-                                    <td className="py-3.5 px-4 align-top">
-                                      <div className="font-bold text-teal-800 flex items-center gap-1.5">
-                                        <svg
-                                          className="w-3.5 h-3.5 text-teal-600 shrink-0"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          viewBox="0 0 24 24"
-                                        >
-                                          <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                                          />
-                                        </svg>
-                                        <span>{court.facility_name}</span>
+                                    <td className="py-3 px-4 align-top">
+                                      <div className="font-bold text-teal-800">
+                                        {court.facility_name}
                                       </div>
-                                      <div className="text-slate-500 mt-1 flex items-center gap-1">
-                                        <svg
-                                          className="w-3.5 h-3.5 text-slate-400 shrink-0"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          viewBox="0 0 24 24"
-                                        >
-                                          <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                                          />
-                                        </svg>
-                                        <span className="line-clamp-1">{court.address}</span>
+                                      <div className="text-slate-500 mt-0.5 line-clamp-1">
+                                        {court.address}
                                       </div>
                                     </td>
 
                                     {/* Cột 3: Chủ sân quản lý */}
-                                    <td className="py-3.5 px-4 align-top">
+                                    <td className="py-3 px-4 align-top">
                                       <div className="font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
                                         <span>{court.owner_name}</span>
                                         {mine && (
                                           <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                            Cơ sở của bạn
+                                            Của bạn
                                           </span>
                                         )}
                                       </div>
                                       {court.owner_email && (
-                                        <span className="text-[11px] text-slate-400 block mt-0.5">
+                                        <span className="text-[11px] text-slate-400 block">
                                           {court.owner_email}
                                         </span>
                                       )}
                                     </td>
 
                                     {/* Cột 4: Sức chứa & Tiện ích */}
-                                    <td className="py-3.5 px-4 align-top">
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold">
-                                        👥 Tối đa {court.capacity || 10} người
+                                    <td className="py-3 px-4 align-top">
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold">
+                                        Tối đa {court.capacity || 10} người
                                       </span>
-                                      {court.utilities && (
-                                        <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">
-                                          Tiện ích: {court.utilities}
-                                        </p>
+                                      {cleanUtils.length > 0 && (
+                                        <div className="mt-1 flex flex-wrap gap-1">
+                                          {cleanUtils.slice(0, 3).map((u, idx) => (
+                                            <span
+                                              key={idx}
+                                              className="px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-[10px] text-slate-600"
+                                            >
+                                              ✓ {u}
+                                            </span>
+                                          ))}
+                                        </div>
                                       )}
                                     </td>
 
                                     {/* Cột 5: Trạng thái hoạt động */}
-                                    <td className="py-3.5 px-4 align-top text-right">
+                                    <td className="py-3 px-4 align-top text-right">
                                       <span
                                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${statusBadge.badgeClass}`}
                                       >
@@ -799,7 +789,7 @@ export default function SportManagementPage() {
                           </table>
                         </div>
 
-                        {/* Phân trang con bên trong từng môn nếu môn đó có nhiều hơn COURTS_PER_SPORT_PAGE sân */}
+                        {/* Phân trang con bên trong từng môn */}
                         {totalCourtPages > 1 && (
                           <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
                             <span className="text-xs text-slate-500">
@@ -811,8 +801,7 @@ export default function SportManagementPage() {
                                   filteredCourts.length
                                 )}
                               </strong>{' '}
-                              trên tổng số <strong>{filteredCourts.length}</strong> sân thuộc môn{' '}
-                              {sport.sport_name}
+                              / <strong>{filteredCourts.length}</strong> sân
                             </span>
 
                             <div className="flex items-center gap-1.5">
@@ -862,7 +851,7 @@ export default function SportManagementPage() {
 
         {/* Thanh phân trang chính cho danh sách các môn thể thao */}
         {totalPages > 1 && (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
             <span className="text-xs text-slate-500">
               Đang xem trang <strong>{currentPage}</strong> / <strong>{totalPages}</strong> (Tổng{' '}
               <strong>{processedSports.length}</strong> loại môn thể thao)
@@ -999,11 +988,6 @@ export default function SportManagementPage() {
                 {statusModal.targetStatus === 'ACTIVE' ? 'kích hoạt lại' : 'ngừng hoạt động'}
               </strong>{' '}
               môn thể thao <strong className="text-emerald-700">"{statusModal.sport.sport_name}"</strong>?
-              {statusModal.targetStatus === 'INACTIVE' && (
-                <span className="block mt-2 text-xs text-amber-600 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-                  Lưu ý nghiệp vụ: Dữ liệu môn thể thao và các sân đã tham chiếu môn này vẫn được bảo toàn trong database, nhưng môn này sẽ không được phép chọn khi tạo thêm cấu hình sân mới.
-                </span>
-              )}
             </p>
 
             <div className="mt-6 flex items-center justify-end gap-3">

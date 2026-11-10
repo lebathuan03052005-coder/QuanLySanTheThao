@@ -20,71 +20,105 @@ const DEMO_OWNER_ACCOUNTS = [
   {
     email: 'owner@sportlink.vn',
     password: 'password123',
-    label: 'Owner 1: Trần Chủ Sân',
+    shortName: 'Owner 1 (Man Thiện)',
+    fullName: 'Trần Chủ Sân',
     subLabel: 'Cụm Bóng Đá Man Thiện & CLB Cầu Lông Hiệp Phú',
   },
   {
     email: 'owner2@sportlink.vn',
     password: 'password123',
-    label: 'Owner 2: Nguyễn Minh Hoàng',
+    shortName: 'Owner 2 (Khu CNC)',
+    fullName: 'Nguyễn Minh Hoàng',
     subLabel: 'TT Pickleball & Tennis Khu CNC & Nhà Thi Đấu Bóng Rổ',
   },
   {
     email: 'owner3@sportlink.vn',
     password: 'password123',
-    label: 'Owner 3: Lê Quốc Bảo',
+    shortName: 'Owner 3 (Làng ĐH)',
+    fullName: 'Lê Quốc Bảo',
     subLabel: 'Tổ Hợp Thể Thao Đa Năng Làng Đại Học Thủ Đức',
   },
 ];
 
+/**
+ * Chuẩn hóa chuỗi tiện ích từ database (hỗ trợ cả mảng JSON ["A", "B"] lẫn chuỗi "A, B")
+ * để không bao giờ hiển thị ký tự [" hoặc "] ra giao diện.
+ */
+function parseUtilities(raw?: string | null): string[] {
+  if (!raw || !raw.trim()) return [];
+  const trimmed = raw.trim();
+
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => String(item).replace(/^[\s"'[\]]+|[\s"'[\]]+$/g, '').trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Fallback xử lý chuỗi nếu JSON không hoàn chỉnh
+    }
+  }
+
+  return trimmed
+    .replace(/[\[\]"]/g, '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Nhận diện màu sắc và nhãn trực quan theo môn thể thao (sử dụng SVG sắc nét thay vì emoji hệ thống)
+ */
 function getSportVisual(sportName?: string) {
   const lower = (sportName || '').toLowerCase();
   if (lower.includes('bóng đá') || lower.includes('futsal')) {
     return {
-      icon: '⚽',
       badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      cardAccent: 'border-l-4 border-l-emerald-500',
+      dotColor: 'bg-emerald-500',
+      cardAccent: 'border-t-4 border-t-emerald-500',
     };
   }
   if (lower.includes('cầu lông')) {
     return {
-      icon: '🏸',
       badgeClass: 'bg-cyan-50 text-cyan-700 border-cyan-200',
-      cardAccent: 'border-l-4 border-l-cyan-500',
+      dotColor: 'bg-cyan-500',
+      cardAccent: 'border-t-4 border-t-cyan-500',
     };
   }
   if (lower.includes('pickleball')) {
     return {
-      icon: '🏓',
       badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
-      cardAccent: 'border-l-4 border-l-blue-500',
+      dotColor: 'bg-blue-500',
+      cardAccent: 'border-t-4 border-t-blue-500',
     };
   }
   if (lower.includes('tennis') || lower.includes('quần vợt')) {
     return {
-      icon: '🎾',
       badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-      cardAccent: 'border-l-4 border-l-indigo-500',
+      dotColor: 'bg-indigo-500',
+      cardAccent: 'border-t-4 border-t-indigo-500',
     };
   }
   if (lower.includes('bóng rổ')) {
     return {
-      icon: '🏀',
       badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',
-      cardAccent: 'border-l-4 border-l-amber-500',
+      dotColor: 'bg-amber-500',
+      cardAccent: 'border-t-4 border-t-amber-500',
     };
   }
   if (lower.includes('bóng chuyền')) {
     return {
-      icon: '🏐',
       badgeClass: 'bg-purple-50 text-purple-700 border-purple-200',
-      cardAccent: 'border-l-4 border-l-purple-500',
+      dotColor: 'bg-purple-500',
+      cardAccent: 'border-t-4 border-t-purple-500',
     };
   }
   return {
-    icon: '🏟️',
-    badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
-    cardAccent: 'border-l-4 border-l-teal-500',
+    badgeClass: 'bg-teal-50 text-teal-700 border-teal-200',
+    dotColor: 'bg-teal-500',
+    cardAccent: 'border-t-4 border-t-teal-500',
   };
 }
 
@@ -229,7 +263,7 @@ export default function FacilityManagementPage() {
           avatarUrl: raw.avatarUrl ?? raw.avatar_url ?? null,
         };
         setAuth(authenticatedUser, res.token);
-        showToast(`Đã chuyển sang tài khoản chủ sân: ${authenticatedUser.fullName} (${email})`);
+        showToast(`Đã chuyển sang: ${authenticatedUser.fullName} (${email})`);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể chuyển tài khoản kiểm thử.';
@@ -375,7 +409,7 @@ export default function FacilityManagementPage() {
       sportId: court.sport_id,
       capacity: court.capacity || 10,
       description: court.description || '',
-      utilities: court.utilities || '',
+      utilities: parseUtilities(court.utilities).join(', '),
     });
     setCourtError(null);
     setIsCourtModalOpen(true);
@@ -391,12 +425,17 @@ export default function FacilityManagementPage() {
     setCourtSubmitting(true);
     setCourtError(null);
     try {
+      const cleanedPayload = {
+        ...courtForm,
+        utilities: parseUtilities(courtForm.utilities).join(', '),
+      };
+
       if (editingCourt) {
-        await updateCourtInFacilityApi(editingCourt.court_id, courtForm);
+        await updateCourtInFacilityApi(editingCourt.court_id, cleanedPayload);
         await loadInitialData(selectedFacility?.facility_id);
         showToast('Đã cập nhật thông tin sân con thành công.');
       } else if (targetFacilityForCourt) {
-        await createCourtInFacilityApi(targetFacilityForCourt.facility_id, courtForm);
+        await createCourtInFacilityApi(targetFacilityForCourt.facility_id, cleanedPayload);
         await loadInitialData(targetFacilityForCourt.facility_id);
         showToast(`Đã thêm sân con mới vào "${targetFacilityForCourt.name}".`);
       }
@@ -441,11 +480,11 @@ export default function FacilityManagementPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col gap-5 min-h-[calc(100vh-2rem)]">
+    <div className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
       {/* Toast thông báo nổi */}
       {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2 px-5 py-3.5 bg-emerald-600 text-white rounded-2xl shadow-2xl animate-fade-in font-medium text-sm">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="fixed top-5 right-5 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl animate-fade-in font-semibold text-xs">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
           <span>{toastMsg}</span>
@@ -454,206 +493,186 @@ export default function FacilityManagementPage() {
 
       {/* Thông báo lỗi nếu có */}
       {errorMsg && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-2xl">
+        <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-2xl">
           {errorMsg}
         </div>
       )}
 
-      {/* 1. Header Card: Tiêu đề, Badge WBS & Nút Chức năng */}
-      <div className="shrink-0 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 md:p-7 rounded-3xl border border-slate-200/80 shadow-md">
-        <div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
-              Quản Lý Cơ Sở Sân & Danh Sách Sân Con
-            </h1>
-            <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
-              WBS 3.1 (S2-02)
-            </span>
-          </div>
-          <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-            Mỗi tài khoản Chủ sân (OWNER) quản lý độc lập các Cơ sở sân (địa điểm) và các Sân con (Sân 1, Sân 2, Sân 3...) trực thuộc cơ sở đó
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => navigate('/owner/sports')}
-            className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-2xl transition-all cursor-pointer"
-          >
-            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-            <span>Quản lý loại môn thể thao</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleOpenCreateFacility}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-sm font-semibold rounded-2xl shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all cursor-pointer shrink-0"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            <span>Thêm cơ sở sân mới</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 1.5. Thanh thông tin Chủ sân hiện tại & Chuyển nhanh 3 tài khoản Chủ sân để kiểm thử phân tách dữ liệu */}
-      <div className="shrink-0 bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white p-5 rounded-3xl shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-xl shrink-0">
-            👤
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs uppercase tracking-wider font-bold text-emerald-300">
-                Tài khoản Chủ sân đang đăng nhập:
-              </span>
-              <span className="text-sm font-extrabold text-white">
-                {user?.fullName || 'Chủ sân SportLink'}
-              </span>
-              {user?.email && (
-                <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-emerald-200 text-xs font-mono">
-                  {user.email}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-300 mt-1">
-              Mỗi tài khoản Chủ sân chỉ nhìn thấy và quản lý các cơ sở & sân con thuộc quyền sở hữu của riêng mình (Mật khẩu chung: <code className="text-emerald-300 font-bold">password123</code>).
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold text-emerald-200 mr-1">
-            Chuyển nhanh tài khoản Test:
-          </span>
-          {DEMO_OWNER_ACCOUNTS.map((acc) => {
-            const isCurrent = user?.email?.toLowerCase() === acc.email.toLowerCase();
-            const isSwitching = switchingAccount === acc.email;
-
-            return (
-              <button
-                key={acc.email}
-                type="button"
-                disabled={isCurrent || Boolean(switchingAccount)}
-                onClick={() => handleQuickSwitchOwner(acc.email, acc.password)}
-                title={`${acc.subLabel} (Email: ${acc.email} / MK: password123)`}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex flex-col items-start text-left border ${
-                  isCurrent
-                    ? 'bg-emerald-500 text-white border-emerald-300 shadow-md'
-                    : 'bg-white/10 hover:bg-white/20 text-slate-100 border-white/15'
-                }`}
-              >
-                <span className="flex items-center gap-1.5">
-                  <span>{isSwitching ? 'Đang chuyển...' : acc.label}</span>
-                  {isCurrent && (
-                    <span className="px-1.5 py-0.2 bg-white/25 rounded text-[10px]">Đang chọn</span>
-                  )}
-                </span>
-                <span className="text-[10px] font-mono opacity-80">{acc.email}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 2. Thẻ KPI Thống kê của Chủ sân hiện tại */}
-      <div className="shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-            Cơ sở sân của bạn
-          </span>
-          <div className="text-3xl font-black text-slate-900 mt-2">{stats.totalFac}</div>
-          <span className="text-xs text-slate-400 mt-1 block">Thuộc tài khoản {user?.email}</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Cơ sở đang mở
-            </span>
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          </div>
-          <div className="text-3xl font-black text-emerald-600 mt-2">{stats.activeFac}</div>
-          <span className="text-xs text-slate-400 mt-1 block">Đang hoạt động & nhận đặt lịch</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-            Tổng sân con trực thuộc
-          </span>
-          <div className="text-3xl font-black text-slate-900 mt-2">{stats.totalCourts}</div>
-          <span className="text-xs text-slate-400 mt-1 block">Các sân nhỏ (Sân 1, Sân 2, Sân 3...)</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Sân con sẵn sàng
-            </span>
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-          </div>
-          <div className="text-3xl font-black text-teal-600 mt-2">{stats.activeCourts}</div>
-          <span className="text-xs text-slate-400 mt-1 block">Đang mở cho khách đặt khung giờ</span>
-        </div>
-      </div>
-
-      {/* 3. Nội dung chính: Cột trái (Danh sách Cơ sở lớn) - Cột phải (Chi tiết & Danh sách Sân con) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 items-start">
-        {/* ==================== CỘT TRÁI (5 phần): DANH SÁCH CƠ SỞ ĐỊA ĐIỂM ==================== */}
-        <div className="lg:col-span-5 flex flex-col gap-3.5 bg-white p-5 rounded-3xl border border-slate-200/80 shadow-md">
-          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
+      {/* 1. THANH ĐIỀU KHIỂN TRUNG TÂM (Gộp Header + Tab Điều hướng + Chuyển tài khoản Test + KPI Gọn Gàng) */}
+      <div className="shrink-0 bg-white rounded-3xl border border-slate-200/80 shadow-sm p-5 flex flex-col gap-4">
+        {/* Hàng 1: Tiêu đề + Tab chuyển trang + Nút thêm cơ sở */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 pb-4 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div>
-              <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
-                1. Danh sách Cơ sở của tôi ({filteredFacilities.length})
-              </h2>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight">
+                  Quản Lý Cơ Sở Sân & Sân Con
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200">
+                  WBS 3.1
+                </span>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Chọn 1 cơ sở bên dưới để xem/thêm các sân con bên trong
+                Đang quản lý dưới quyền chủ sân:{' '}
+                <strong className="text-slate-800">{user?.fullName || 'Chủ sân SportLink'}</strong>{' '}
+                {user?.email && <span className="text-emerald-600 font-mono">({user.email})</span>}
+              </p>
+            </div>
+          </div>
+
+          {/* Bộ nút chuyển Tab & Chuyển nhanh 3 tài khoản Chủ sân Test */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Thanh chuyển nhanh 3 tài khoản Owner */}
+            <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+              <span className="text-[11px] font-bold text-slate-500 px-2 hidden sm:inline">
+                Đổi tài khoản Test:
+              </span>
+              {DEMO_OWNER_ACCOUNTS.map((acc) => {
+                const isCurrent = user?.email?.toLowerCase() === acc.email.toLowerCase();
+                const isSwitching = switchingAccount === acc.email;
+
+                return (
+                  <button
+                    key={acc.email}
+                    type="button"
+                    disabled={isCurrent || Boolean(switchingAccount)}
+                    onClick={() => handleQuickSwitchOwner(acc.email, acc.password)}
+                    title={`${acc.fullName} — ${acc.subLabel} (${acc.email} / MK: password123)`}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      isCurrent
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                    }`}
+                  >
+                    {isSwitching ? 'Đang chuyển...' : acc.shortName}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Nút sang Quản lý loại môn */}
+            <button
+              type="button"
+              onClick={() => navigate('/owner/sports')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+              <span>Danh mục Môn thể thao</span>
+            </button>
+
+            {/* Nút Thêm cơ sở mới */}
+            <button
+              type="button"
+              onClick={handleOpenCreateFacility}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>Thêm cơ sở mới</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Hàng 2: 4 Thẻ KPI Gọn Gàng (Inline Horizontal Strip) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Cơ sở của bạn
+              </span>
+              <span className="text-[11px] text-slate-400">Địa điểm thuộc sở hữu</span>
+            </div>
+            <span className="text-2xl font-black text-slate-900">{stats.totalFac}</span>
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-50/50 border border-emerald-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">
+                Cơ sở đang mở
+              </span>
+              <span className="text-[11px] text-emerald-600/80">Đang nhận đặt lịch</span>
+            </div>
+            <span className="text-2xl font-black text-emerald-600">{stats.activeFac}</span>
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Tổng sân con
+              </span>
+              <span className="text-[11px] text-slate-400">Sân 1, Sân 2, Sân 3...</span>
+            </div>
+            <span className="text-2xl font-black text-slate-900">{stats.totalCourts}</span>
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-teal-50/50 border border-teal-200/70">
+            <div>
+              <span className="text-[11px] font-bold text-teal-700 uppercase tracking-wider block">
+                Sân con hoạt động
+              </span>
+              <span className="text-[11px] text-teal-600/80">Sẵn sàng phục vụ</span>
+            </div>
+            <span className="text-2xl font-black text-teal-600">{stats.activeCourts}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. BỐ CỤC CHÍNH CÂN ĐỐI: CỘT TRÁI (4/12 - Danh sách Cơ sở) & CỘT PHẢI (8/12 - Chi tiết Sân con) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 items-start">
+        {/* ==================== CỘT TRÁI (4/12): DANH SÁCH CƠ SỞ ĐỊA ĐIỂM ==================== */}
+        <div className="lg:col-span-4 flex flex-col gap-3.5 bg-white p-4 md:p-5 rounded-3xl border border-slate-200/80 shadow-sm">
+          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+            <div>
+              <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                1. Cơ sở của tôi ({filteredFacilities.length})
+              </h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Chọn 1 cơ sở để quản lý các sân con bên trong
               </p>
             </div>
 
             <button
               type="button"
               onClick={handleOpenCreateFacility}
-              className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition-colors cursor-pointer shrink-0"
+              className="px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition-colors cursor-pointer shrink-0"
             >
               + Thêm cơ sở
             </button>
           </div>
 
-          {/* Thanh lọc cơ sở */}
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
+          {/* Thanh tìm kiếm & lọc cơ sở gọn trên 1 hàng */}
+          <div className="flex gap-2">
+            <div className="relative flex-1 min-w-0">
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Tìm cơ sở, địa chỉ, tên sân..."
-                className="w-full pl-3.5 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+                placeholder="Tìm cơ sở, địa chỉ..."
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Lọc trạng thái cơ sở"
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shrink-0"
             >
-              <option value="ALL">Tất cả trạng thái</option>
-              <option value="ACTIVE">Đang hoạt động</option>
-              <option value="INACTIVE">Ngừng hoạt động</option>
+              <option value="ALL">Tất cả</option>
+              <option value="ACTIVE">Đang mở</option>
+              <option value="INACTIVE">Tạm khóa</option>
             </select>
           </div>
 
           {loading ? (
-            <div className="p-8 text-center text-slate-400 text-sm">
-              Đang tải danh sách cơ sở của bạn...
+            <div className="p-8 text-center text-slate-400 text-xs">
+              Đang tải danh sách cơ sở...
             </div>
           ) : paginatedFacilities.length === 0 ? (
             <div className="p-8 text-center rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs">
-              Tài khoản này chưa có cơ sở sân nào phù hợp. Hãy nhấn <strong>"+ Thêm cơ sở"</strong> để khởi tạo cơ sở sân mới!
+              Chưa có cơ sở sân nào. Hãy nhấn <strong>"+ Thêm cơ sở"</strong> để tạo mới!
             </div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -666,105 +685,44 @@ export default function FacilityManagementPage() {
                   <div
                     key={fac.facility_id}
                     onClick={() => selectFacility(fac)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer relative ${
+                    className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2.5 ${
                       isSelected
-                        ? 'border-emerald-500 bg-emerald-50/30 shadow-md ring-2 ring-emerald-500/20'
-                        : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-sm'
+                        ? 'border-emerald-500 bg-emerald-50/25 shadow-sm ring-2 ring-emerald-500/15'
+                        : 'border-slate-200/90 bg-white hover:border-slate-300 hover:bg-slate-50/40'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-mono font-bold">
-                            CS #{fac.facility_id}
-                          </span>
-                          <h3 className="text-base font-extrabold text-slate-900">{fac.name}</h3>
-                        </div>
-
-                        <p className="text-xs text-slate-600 mt-1.5 flex items-center gap-1">
-                          <svg className="w-3.5 h-3.5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          <span className="line-clamp-1">{fac.address}</span>
-                        </p>
-
-                        {fac.phone && (
-                          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                            <span>📞 Hotline: {fac.phone}</span>
-                          </p>
-                        )}
-                      </div>
-
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border shrink-0 ${
-                          isActive
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border-slate-300'
-                        }`}
-                      >
-                        {isActive ? 'Đang hoạt động' : 'Ngừng hoạt động'}
-                      </span>
-                    </div>
-
-                    {/* Hiển thị trực quan các sân con nằm trong cơ sở này */}
-                    <div className="mt-3 p-2.5 rounded-xl bg-slate-50 border border-slate-200/70">
-                      <div className="text-[11px] font-bold text-slate-600 mb-1.5 flex items-center justify-between">
-                        <span>Các sân con trực thuộc ({fac.total_courts} sân):</span>
-                        <span className="text-emerald-600">{fac.active_courts} sân đang mở</span>
-                      </div>
-
-                      {previews.length === 0 ? (
-                        <span className="text-[11px] text-slate-400 italic">
-                          Chưa có sân con nào — nhấn "+ Thêm sân con" để tạo Sân 1, Sân 2...
-                        </span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {previews.slice(0, 4).map((cp) => {
-                            const spVis = getSportVisual(cp.sport_name);
-                            return (
-                              <span
-                                key={cp.court_id}
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${
-                                  cp.status === 'ACTIVE'
-                                    ? 'bg-white text-slate-800 border-slate-200 shadow-2xs'
-                                    : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-                                }`}
-                              >
-                                <span>{spVis.icon}</span>
-                                <span className="truncate max-w-[160px]">{cp.court_name}</span>
-                              </span>
-                            );
-                          })}
-                          {previews.length > 4 && (
-                            <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-                              +{previews.length - 4} sân khác
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Thanh công cụ thao tác nhanh trên Cơ sở */}
-                    <div
-                      className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={(e) => handleOpenCreateCourt(fac, e)}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer"
-                      >
-                        <span>+ Thêm sân con vào cơ sở này</span>
-                      </button>
-
+                    {/* Dòng 1: Mã cơ sở + Trạng thái + Nút Sửa/Khóa nhanh */}
+                    <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-mono font-bold">
+                          CS #{fac.facility_id}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                            isActive
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-slate-100 text-slate-600 border-slate-300'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isActive ? 'bg-emerald-500' : 'bg-slate-400'
+                            }`}
+                          />
+                          <span>{isActive ? 'Đang hoạt động' : 'Tạm khóa'}</span>
+                        </span>
+                      </div>
+
+                      <div
+                        className="flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           type="button"
                           onClick={(e) => handleOpenEditFacility(fac, e)}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                          className="px-2 py-0.5 rounded-lg text-[11px] font-semibold text-slate-600 hover:bg-slate-200/70 transition-colors cursor-pointer"
                         >
-                          Sửa cơ sở
+                          Sửa
                         </button>
                         <button
                           type="button"
@@ -776,16 +734,88 @@ export default function FacilityManagementPage() {
                               targetStatus: isActive ? 'INACTIVE' : 'ACTIVE',
                             })
                           }
-                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
                             isActive
-                              ? 'text-amber-700 hover:bg-amber-50'
-                              : 'text-emerald-700 hover:bg-emerald-50'
+                              ? 'text-amber-700 hover:bg-amber-100/70'
+                              : 'text-emerald-700 hover:bg-emerald-100/70'
                           }`}
                         >
-                          {isActive ? 'Khóa' : 'Mở lại'}
+                          {isActive ? 'Khóa' : 'Mở'}
                         </button>
                       </div>
                     </div>
+
+                    {/* Dòng 2: Tên cơ sở trải rộng 100% chiều ngang (không bị ép xuống dòng) */}
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-900 leading-snug">
+                        {fac.name}
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1 flex items-start gap-1.5">
+                        <svg
+                          className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                        </svg>
+                        <span className="line-clamp-1">{fac.address}</span>
+                      </p>
+                    </div>
+
+                    {/* Dòng 3: Tóm tắt sân con & Nút thêm sân con */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 text-[11px] font-bold">
+                          {fac.total_courts} sân con
+                        </span>
+                        <span className="text-[11px] text-emerald-600 font-semibold">
+                          ({fac.active_courts} đang mở)
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenCreateCourt(fac, e)}
+                        className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer shrink-0"
+                      >
+                        + Thêm sân con
+                      </button>
+                    </div>
+
+                    {/* Dòng 4: Chip tên các sân con gọn gàng */}
+                    {previews.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {previews.slice(0, 3).map((cp) => {
+                          const spVis = getSportVisual(cp.sport_name);
+                          return (
+                            <span
+                              key={cp.court_id}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200/80 text-[11px] text-slate-700 font-medium max-w-full"
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${spVis.dotColor}`} />
+                              <span className="truncate">{cp.court_name}</span>
+                            </span>
+                          );
+                        })}
+                        {previews.length > 3 && (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[11px] font-bold">
+                            +{previews.length - 3} sân nữa
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -820,31 +850,50 @@ export default function FacilityManagementPage() {
           )}
         </div>
 
-        {/* ==================== CỘT PHẢI (7 phần): DANH SÁCH SÂN CON CỦA CƠ SỞ ĐANG CHỌN ==================== */}
-        <div className="lg:col-span-7 flex flex-col gap-4">
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-md">
+        {/* ==================== CỘT PHẢI (8/12): DANH SÁCH SÂN CON CỦA CƠ SỞ ĐANG CHỌN ==================== */}
+        <div className="lg:col-span-8 flex flex-col gap-4">
+          <div className="bg-white p-5 md:p-6 rounded-3xl border border-slate-200/80 shadow-sm">
             {selectedFacility ? (
               <>
                 {/* Header thông tin Cơ sở đang chọn */}
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-slate-100">
-                  <div>
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
-                        2. Chi tiết Cơ sở đang chọn
+                        2. Cơ sở đang chọn
                       </span>
                       <span className="text-xs text-slate-400 font-mono">
                         Mã cơ sở: #{selectedFacility.facility_id}
                       </span>
+                      {selectedFacility.phone && (
+                        <span className="text-xs text-slate-500 font-medium">
+                          • Hotline: <strong className="text-slate-700">{selectedFacility.phone}</strong>
+                        </span>
+                      )}
                     </div>
-                    <h3 className="text-xl font-extrabold text-slate-900 mt-2">
+
+                    <h3 className="text-xl font-extrabold text-slate-900 mt-1.5">
                       {selectedFacility.name}
                     </h3>
-                    <p className="text-xs text-slate-600 mt-1 flex items-center gap-1.5">
-                      <span>📍 {selectedFacility.address}</span>
-                      {selectedFacility.phone && <span>• 📞 {selectedFacility.phone}</span>}
+                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                      <svg
+                        className="w-3.5 h-3.5 text-emerald-600 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                        />
+                      </svg>
+                      <span>{selectedFacility.address}</span>
                     </p>
+
                     {selectedFacility.description && (
-                      <p className="text-xs text-slate-500 mt-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+                      <p className="text-xs text-slate-600 mt-2 leading-relaxed">
                         {selectedFacility.description}
                       </p>
                     )}
@@ -853,10 +902,10 @@ export default function FacilityManagementPage() {
                   <button
                     type="button"
                     onClick={() => handleOpenCreateCourt(selectedFacility)}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer shrink-0"
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer shrink-0"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M12 4v16m8-8H4" />
                     </svg>
                     <span>Thêm sân con mới</span>
                   </button>
@@ -864,15 +913,22 @@ export default function FacilityManagementPage() {
 
                 {/* Thanh lọc & tìm kiếm Sân con trong cơ sở */}
                 <div className="mt-4 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-200/70">
-                  <input
-                    type="text"
-                    value={courtSearch}
-                    onChange={(e) => setCourtSearch(e.target.value)}
-                    placeholder="Tìm theo tên sân con (Sân 1, Sân 2...), tiện ích..."
-                    className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
-                  />
+                  <div className="relative flex-1">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </span>
+                    <input
+                      type="text"
+                      value={courtSearch}
+                      onChange={(e) => setCourtSearch(e.target.value)}
+                      placeholder="Tìm theo tên sân con (Sân 1, Sân 2...), môn thể thao, tiện ích..."
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+                    />
+                  </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <select
                       value={courtSportFilter}
                       onChange={(e) => setCourtSportFilter(e.target.value)}
@@ -901,9 +957,9 @@ export default function FacilityManagementPage() {
                 </div>
 
                 {/* Danh sách chi tiết các sân con */}
-                <div className="mt-5">
+                <div className="mt-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
                       Danh sách các sân con trong cơ sở ({filteredCourts.length} sân)
                     </h4>
                     {totalCourtPages > 1 && (
@@ -919,38 +975,33 @@ export default function FacilityManagementPage() {
                     </div>
                   ) : paginatedCourts.length === 0 ? (
                     <div className="py-12 px-4 text-center border border-dashed border-slate-300 rounded-2xl text-slate-500 text-xs">
-                      Chưa có sân con nào trong danh sách lọc. Nhấn nút{' '}
+                      Chưa có sân con nào phù hợp. Nhấn nút{' '}
                       <strong>"+ Thêm sân con mới"</strong> ở góc phải để thêm Sân 1, Sân 2... vào cơ sở này.
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                       {paginatedCourts.map((court) => {
                         const isCourtActive = court.status === 'ACTIVE';
                         const spVis = getSportVisual(court.sport_name);
-                        const utilityList = court.utilities
-                          ? court.utilities
-                              .split(',')
-                              .map((u) => u.trim())
-                              .filter(Boolean)
-                          : [];
+                        const utilityList = parseUtilities(court.utilities);
 
                         return (
                           <div
                             key={court.court_id}
-                            className={`p-4 rounded-2xl border border-slate-200/90 bg-white hover:shadow-md transition-all flex flex-col justify-between ${spVis.cardAccent}`}
+                            className={`p-5 rounded-2xl border border-slate-200/90 bg-white hover:shadow-md transition-all flex flex-col justify-between ${spVis.cardAccent}`}
                           >
                             <div>
                               {/* Dòng 1: Loại môn thể thao & Trạng thái hoạt động */}
                               <div className="flex items-center justify-between gap-2">
                                 <span
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border text-xs font-bold ${spVis.badgeClass}`}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold ${spVis.badgeClass}`}
                                 >
-                                  <span>{spVis.icon}</span>
+                                  <span className={`w-2 h-2 rounded-full ${spVis.dotColor}`} />
                                   <span>{court.sport_name || 'Môn thể thao'}</span>
                                 </span>
 
                                 <span
-                                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
                                     isCourtActive
                                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                       : 'bg-slate-100 text-slate-600 border-slate-300'
@@ -967,49 +1018,47 @@ export default function FacilityManagementPage() {
                                 </span>
                               </div>
 
-                              {/* Dòng 2: Tên sân con & Mã sân */}
-                              <div className="mt-2.5">
-                                <h5 className="text-base font-extrabold text-slate-900 leading-snug">
-                                  {court.court_name}
-                                </h5>
-                                <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
-                                  <span className="font-mono text-[11px] text-slate-400">
-                                    Mã sân: #{court.court_id}
-                                  </span>
-                                  <span>•</span>
-                                  <span>
-                                    👥 Sức chứa: <strong className="text-slate-800">{court.capacity || 10} người</strong>
-                                  </span>
-                                </div>
-                              </div>
+                              {/* Dòng 2: Tên sân con */}
+                              <h5 className="text-base font-extrabold text-slate-900 leading-snug mt-3">
+                                {court.court_name}
+                              </h5>
 
-                              {/* Dòng 3: Mô tả mặt sân */}
+                              {/* Dòng 3: Mô tả mặt sân (Tách padding ra thẻ div ngoài để không bị cắt chữ dòng 2) */}
                               {court.description && (
-                                <p className="text-xs text-slate-600 mt-2 bg-slate-50 p-2 rounded-xl border border-slate-100 line-clamp-2">
-                                  {court.description}
-                                </p>
+                                <div className="mt-2.5 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
+                                  <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
+                                    {court.description}
+                                  </p>
+                                </div>
                               )}
 
-                              {/* Dòng 4: Tiện ích đi kèm */}
+                              {/* Dòng 4: Tiện ích đi kèm (Đã làm sạch hoàn toàn dấu [" và "]) */}
                               {utilityList.length > 0 && (
-                                <div className="mt-2.5 flex flex-wrap gap-1">
+                                <div className="mt-3 flex flex-wrap gap-1.5">
                                   {utilityList.map((util, idx) => (
                                     <span
                                       key={idx}
-                                      className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-medium"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100/90 text-slate-700 text-[11px] font-medium border border-slate-200/60"
                                     >
-                                      ✓ {util}
+                                      <span className="text-emerald-600 font-bold">✓</span>
+                                      <span>{util}</span>
                                     </span>
                                   ))}
                                 </div>
                               )}
                             </div>
 
-                            {/* Chân thẻ: Chỉnh sửa & Đổi trạng thái */}
+                            {/* Chân thẻ: Mã sân + Sức chứa bên trái, Nút thao tác bên phải (Không bị cắt chữ) */}
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                              <span className="text-[11px] text-slate-400 truncate">
-                                Thuộc: {selectedFacility.name}
-                              </span>
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[11px] font-semibold">
+                                  Mã #{court.court_id}
+                                </span>
+                                <span>•</span>
+                                <span>
+                                  Sức chứa: <strong className="text-slate-800">{court.capacity || 10} người</strong>
+                                </span>
+                              </div>
 
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <button
@@ -1095,7 +1144,7 @@ export default function FacilityManagementPage() {
               </>
             ) : (
               <div className="py-16 text-center text-slate-400">
-                Vui lòng chọn một cơ sở bên trái hoặc nhấn "+ Thêm cơ sở sân mới" để bắt đầu quản lý sân con.
+                Vui lòng chọn một cơ sở bên trái hoặc nhấn "+ Thêm cơ sở mới" để bắt đầu quản lý sân con.
               </div>
             )}
           </div>

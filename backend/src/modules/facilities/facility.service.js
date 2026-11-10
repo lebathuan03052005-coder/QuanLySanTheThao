@@ -251,6 +251,11 @@ async function seedDedicatedOwnersAndFacilities(pool) {
     DELETE FROM [dbo].[facilities]
     WHERE ([name] LIKE N'Cơ sở 1 - Cụm Sân Thể Thao%' OR [name] LIKE N'Cơ sở 2 - Tổ Hợp Thể Thao%')
       AND [facility_id] NOT IN (SELECT DISTINCT [facility_id] FROM [dbo].[courts] WHERE [facility_id] IS NOT NULL);
+
+    -- Chuẩn hóa chuỗi tiện ích bị lưu dạng mảng JSON ["A", "B"] về chuỗi bersih "A, B"
+    UPDATE [dbo].[courts]
+    SET [utilities] = REPLACE(REPLACE(REPLACE([utilities], '[', ''), ']', ''), '"', '')
+    WHERE [utilities] LIKE '[[]%' OR [utilities] LIKE '%"%';
   `);
 
   // --- A. Thiết lập Cơ sở & Sân con cho OWNER 1 (owner@sportlink.vn): Cụm Man Thiện & CLB Cầu Lông Arena ---
