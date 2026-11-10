@@ -150,13 +150,13 @@ export default function SportManagementPage() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [courtStatusFilter, setCourtStatusFilter] = useState<string>('ALL');
 
-  // Phân trang danh sách môn thể thao
+  // Phân trang danh sách môn thể thao (mặc định 3 môn / trang -> 6 môn chia đều 2 trang)
   const [currentPage, setCurrentPage] = useState(1);
-  const [sportsPerPage, setSportsPerPage] = useState(4);
+  const [sportsPerPage, setSportsPerPage] = useState(3);
 
   // Phân trang danh sách sân con bên trong từng môn (map sport_id -> page)
   const [courtPageMap, setCourtPageMap] = useState<Record<number, number>>({});
-  const COURTS_PER_SPORT_PAGE = 3;
+  const COURTS_PER_SPORT_PAGE = 2;
 
   // Modal Thêm / Sửa môn thể thao
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -502,10 +502,10 @@ export default function SportManagementPage() {
             value={sportsPerPage}
             onChange={(e) => setSportsPerPage(Number(e.target.value))}
             aria-label="Số môn hiển thị trên mỗi trang"
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
           >
             <option value={2}>2 môn / trang</option>
-            <option value={4}>4 môn / trang</option>
+            <option value={3}>3 môn / trang</option>
             <option value={6}>6 môn / trang</option>
           </select>
         </div>
@@ -513,13 +513,48 @@ export default function SportManagementPage() {
 
       {/* 3. Danh sách chi tiết từng môn thể thao và bảng các sân con trực thuộc */}
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <h2 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-            Danh mục môn thể thao & Sân trực thuộc ({processedSports.length} môn)
+            Danh mục môn thể thao & Sân trực thuộc ({processedSports.length} môn • {stats.totalCourts} sân của bạn)
           </h2>
-          <span className="text-xs text-slate-500">
-            Trang <strong>{currentPage}</strong> / <strong>{totalPages}</strong>
-          </span>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500 mr-1">
+                Trang <strong>{currentPage}</strong> / <strong>{totalPages}</strong>
+              </span>
+              <button
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
+              >
+                ‹ Trước
+              </button>
+              {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    page === currentPage
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
+              >
+                Sau ›
+              </button>
+            </div>
+          )}
         </div>
 
         {loading ? (

@@ -115,14 +115,16 @@ export default function FacilityManagementPage() {
   const FACILITIES_PER_PAGE = 4;
 
   // Cơ sở đang được chọn & Bộ lọc danh sách sân con (Cột phải)
+  // isAllFacilitiesMode = true: Xem toàn bộ ~18 sân con của tất cả cơ sở thuộc Owner
+  const [isAllFacilitiesMode, setIsAllFacilitiesMode] = useState<boolean>(true);
   const [selectedFacility, setSelectedFacility] = useState<FacilityItem | null>(null);
-  const [courts, setCourts] = useState<CourtItem[]>([]);
+  const [courts, setCourts] = useState<(CourtItem & { facility_name?: string })[]>([]);
   const [loadingCourts, setLoadingCourts] = useState(false);
   const [courtSearch, setCourtSearch] = useState('');
   const [courtSportFilter, setCourtSportFilter] = useState<string>('ALL');
   const [courtStatusFilter, setCourtStatusFilter] = useState<string>('ALL');
   const [courtPage, setCourtPage] = useState(1);
-  const COURTS_PER_PAGE = 4;
+  const [courtsPerPage, setCourtsPerPage] = useState(6);
 
   // Modal Cơ sở (Thêm / Sửa)
   const [isFacModalOpen, setIsFacModalOpen] = useState(false);
@@ -168,7 +170,14 @@ export default function FacilityManagementPage() {
 
   useEffect(() => {
     setCourtPage(1);
-  }, [courtSearch, courtSportFilter, courtStatusFilter, selectedFacility?.facility_id]);
+  }, [
+    courtSearch,
+    courtSportFilter,
+    courtStatusFilter,
+    selectedFacility?.facility_id,
+    isAllFacilitiesMode,
+    courtsPerPage,
+  ]);
 
   async function loadInitialData(preferredFacId?: number) {
     setLoading(true);
@@ -181,14 +190,18 @@ export default function FacilityManagementPage() {
       setFacilities(facData);
       setSports(sportData);
 
-      const targetFac =
-        (preferredFacId ? facData.find((f) => f.facility_id === preferredFacId) : null) ||
-        facData[0] ||
-        null;
+      if (preferredFacId) {
+        const targetFac = facData.find((f) => f.facility_id === preferredFacId);
+        if (targetFac && !isAllFacilitiesMode) {
+          await selectFacility(targetFac);
+          return;
+        }
+      }
 
-      if (targetFac) {
-        await selectFacility(targetFac);
+      if (facData.length > 0) {
+        await selectAllFacilities(facData);
       } else {
+        setIsAllFacilitiesMode(false);
         setSelectedFacility(null);
         setCourts([]);
       }
@@ -200,13 +213,35 @@ export default function FacilityManagementPage() {
     }
   }
 
-  // Tải danh sách sân con khi chọn cơ sở
+  // Tải toàn bộ danh sách sân con của tất cả cơ sở thuộc quyền sở hữu của Owner
+  async function selectAllFacilities(facList?: FacilityItem[]) {
+    const list = facList || facilities;
+    setIsAllFacilitiesMode(true);
+    setSelectedFacility(list[0] || null);
+    setLoadingCourts(true);
+    try {
+      const allResults = await Promise.all(
+        list.map(async (f) => {
+          const items = await getCourtsByFacilityApi(f.facility_id);
+          return items.map((c) => ({ ...c, facility_name: f.name }));
+        })
+      );
+      setCourts(allResults.flat());
+    } catch {
+      setCourts([]);
+    } finally {
+      setLoadingCourts(false);
+    }
+  }
+
+  // Tải danh sách sân con khi chọn 1 cơ sở cụ thể
   async function selectFacility(fac: FacilityItem) {
+    setIsAllFacilitiesMode(false);
     setSelectedFacility(fac);
     setLoadingCourts(true);
     try {
       const courtData = await getCourtsByFacilityApi(fac.facility_id);
-      setCourts(courtData);
+      setCourts(courtData.map((c) => ({ ...c, facility_name: fac.name })));
     } catch {
       setCourts([]);
     } finally {
@@ -245,7 +280,7 @@ export default function FacilityManagementPage() {
     return filteredFacilities.slice(start, start + FACILITIES_PER_PAGE);
   }, [filteredFacilities, facPage]);
 
-  // Lọc danh sách sân con thuộc cơ sở đang chọn
+  // Lọc danh sách sân con thuộc cơ sở đang chọn (hoặc tất cả cơ sở của Owner)
   const filteredCourts = useMemo(() => {
     const q = courtSearch.trim().toLowerCase();
     return courts.filter((c) => {
@@ -253,6 +288,7 @@ export default function FacilityManagementPage() {
         !q ||
         c.court_name.toLowerCase().includes(q) ||
         (c.sport_name && c.sport_name.toLowerCase().includes(q)) ||
+        (c.facility_name && c.facility_name.toLowerCase().includes(q)) ||
         (c.utilities && c.utilities.toLowerCase().includes(q)) ||
         (c.description && c.description.toLowerCase().includes(q));
       const matchSport =
@@ -262,11 +298,11 @@ export default function FacilityManagementPage() {
     });
   }, [courts, courtSearch, courtSportFilter, courtStatusFilter]);
 
-  const totalCourtPages = Math.max(1, Math.ceil(filteredCourts.length / COURTS_PER_PAGE));
+  const totalCourtPages = Math.max(1, Math.ceil(filteredCourts.length / courtsPerPage));
   const paginatedCourts = useMemo(() => {
-    const start = (courtPage - 1) * COURTS_PER_PAGE;
-    return filteredCourts.slice(start, start + COURTS_PER_PAGE);
-  }, [filteredCourts, courtPage]);
+    const start = (courtPage - 1) * courtsPerPage;
+    return filteredCourts.slice(start, start + courtsPerPage);
+  }, [filteredCourts, courtPage, courtsPerPage]);
 
   // Thống kê KPI của tài khoản Owner hiện tại
   const stats = useMemo(() => {
@@ -594,8 +630,37 @@ export default function FacilityManagementPage() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
+              {/* Nút chọn nhanh: Xem tất cả sân con của toàn bộ cơ sở thuộc Owner (18 sân) */}
+              {facilities.length > 1 && (
+                <div
+                  onClick={() => selectAllFacilities()}
+                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    isAllFacilitiesMode
+                      ? 'border-emerald-500 bg-gradient-to-r from-emerald-50/80 to-teal-50/50 shadow-sm ring-2 ring-emerald-500/15'
+                      : 'border-slate-200/90 bg-slate-50/60 hover:border-slate-300 hover:bg-slate-100/60'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-extrabold uppercase tracking-wider">
+                        Tổng hợp
+                      </span>
+                      <span className="text-xs font-extrabold text-slate-900">
+                        Tất cả cơ sở của tôi ({facilities.length} cơ sở)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Hiển thị toàn bộ <strong>{stats.totalCourts} sân con</strong> trải đều các môn thể thao
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-xl bg-white border border-emerald-200 text-emerald-700 text-xs font-extrabold shrink-0 shadow-2xs">
+                    {stats.totalCourts} sân
+                  </span>
+                </div>
+              )}
+
               {paginatedFacilities.map((fac) => {
-                const isSelected = selectedFacility?.facility_id === fac.facility_id;
+                const isSelected = !isAllFacilitiesMode && selectedFacility?.facility_id === fac.facility_id;
                 const isActive = fac.status === 'ACTIVE';
                 const previews = fac.courts_preview || [];
 
@@ -773,47 +838,68 @@ export default function FacilityManagementPage() {
           <div className="bg-white p-5 md:p-6 rounded-3xl border border-slate-200/80 shadow-sm">
             {selectedFacility ? (
               <>
-                {/* Header thông tin Cơ sở đang chọn */}
+                {/* Header thông tin Cơ sở đang chọn hoặc Toàn bộ cơ sở */}
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-100">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
-                        2. Cơ sở đang chọn
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">
-                        Mã cơ sở: #{selectedFacility.facility_id}
-                      </span>
-                      {selectedFacility.phone && (
-                        <span className="text-xs text-slate-500 font-medium">
-                          • Hotline: <strong className="text-slate-700">{selectedFacility.phone}</strong>
-                        </span>
-                      )}
-                    </div>
+                    {isAllFacilitiesMode ? (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+                            2. Tất cả cơ sở của bạn ({facilities.length} cơ sở)
+                          </span>
+                          <span className="text-xs text-slate-500 font-medium">
+                            • Tổng cộng: <strong className="text-emerald-700">{stats.totalCourts} sân con</strong> (Đủ 6 môn thể thao)
+                          </span>
+                        </div>
+                        <h3 className="text-xl font-extrabold text-slate-900 mt-1.5">
+                          Danh Sách Toàn Bộ Sân Con Thuộc Quyền Sở Hữu
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Hiển thị đầy đủ các sân bóng đá, cầu lông, pickleball, tennis, bóng rổ, bóng chuyền thuộc các cơ sở của bạn. Nhấn vào từng cơ sở bên trái nếu muốn lọc riêng theo địa điểm.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+                            2. Cơ sở đang chọn
+                          </span>
+                          <span className="text-xs text-slate-400 font-mono">
+                            Mã cơ sở: #{selectedFacility.facility_id}
+                          </span>
+                          {selectedFacility.phone && (
+                            <span className="text-xs text-slate-500 font-medium">
+                              • Hotline: <strong className="text-slate-700">{selectedFacility.phone}</strong>
+                            </span>
+                          )}
+                        </div>
 
-                    <h3 className="text-xl font-extrabold text-slate-900 mt-1.5">
-                      {selectedFacility.name}
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                      <svg
-                        className="w-3.5 h-3.5 text-emerald-600 shrink-0"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                        />
-                      </svg>
-                      <span>{selectedFacility.address}</span>
-                    </p>
+                        <h3 className="text-xl font-extrabold text-slate-900 mt-1.5">
+                          {selectedFacility.name}
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                          <svg
+                            className="w-3.5 h-3.5 text-emerald-600 shrink-0"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                            />
+                          </svg>
+                          <span>{selectedFacility.address}</span>
+                        </p>
 
-                    {selectedFacility.description && (
-                      <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                        {selectedFacility.description}
-                      </p>
+                        {selectedFacility.description && (
+                          <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                            {selectedFacility.description}
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -830,7 +916,7 @@ export default function FacilityManagementPage() {
                 </div>
 
                 {/* Thanh lọc & tìm kiếm Sân con trong cơ sở */}
-                <div className="mt-4 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-200/70">
+                <div className="mt-4 flex flex-col xl:flex-row gap-2.5 items-stretch xl:items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-200/70">
                   <div className="relative flex-1">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -846,14 +932,14 @@ export default function FacilityManagementPage() {
                     />
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <select
                       value={courtSportFilter}
                       onChange={(e) => setCourtSportFilter(e.target.value)}
                       aria-label="Lọc sân con theo môn thể thao"
                       className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                     >
-                      <option value="ALL">Tất cả môn thể thao</option>
+                      <option value="ALL">Tất cả môn ({sports.length} môn)</option>
                       {sports.map((sp) => (
                         <option key={sp.sport_id} value={sp.sport_id}>
                           {sp.sport_name}
@@ -871,19 +957,63 @@ export default function FacilityManagementPage() {
                       <option value="ACTIVE">Đang hoạt động</option>
                       <option value="INACTIVE">Đang tạm đóng</option>
                     </select>
+
+                    <select
+                      value={courtsPerPage}
+                      onChange={(e) => setCourtsPerPage(Number(e.target.value))}
+                      aria-label="Số sân hiển thị trên mỗi trang"
+                      className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                    >
+                      <option value={4}>4 sân / trang</option>
+                      <option value={6}>6 sân / trang</option>
+                      <option value={8}>8 sân / trang</option>
+                    </select>
                   </div>
                 </div>
 
                 {/* Danh sách chi tiết các sân con */}
                 <div className="mt-4">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-                      Danh sách các sân con trong cơ sở ({filteredCourts.length} sân)
+                      Danh sách sân con ({filteredCourts.length} sân)
                     </h4>
+
                     {totalCourtPages > 1 && (
-                      <span className="text-xs text-slate-500">
-                        Trang <strong>{courtPage}</strong> / <strong>{totalCourtPages}</strong>
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-500 mr-1">
+                          Trang <strong>{courtPage}</strong>/{totalCourtPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={courtPage <= 1}
+                          onClick={() => setCourtPage((p) => Math.max(1, p - 1))}
+                          className="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
+                        >
+                          ‹
+                        </button>
+                        {Array.from({ length: totalCourtPages }, (_, i) => i + 1).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setCourtPage(p)}
+                            className={`w-7 h-7 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                              p === courtPage
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          disabled={courtPage >= totalCourtPages}
+                          onClick={() => setCourtPage((p) => Math.min(totalCourtPages, p + 1))}
+                          className="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
+                        >
+                          ›
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -936,10 +1066,16 @@ export default function FacilityManagementPage() {
                                 </span>
                               </div>
 
-                              {/* Dòng 2: Tên sân con */}
+                              {/* Dòng 2: Tên sân con & Cơ sở trực thuộc */}
                               <h5 className="text-base font-extrabold text-slate-900 leading-snug mt-3">
                                 {court.court_name}
                               </h5>
+                              {court.facility_name && (
+                                <p className="text-[11px] font-semibold text-teal-700 mt-1 flex items-center gap-1">
+                                  <span>📍 Thuộc:</span>
+                                  <span className="truncate">{court.facility_name}</span>
+                                </p>
+                              )}
 
                               {/* Dòng 3: Mô tả mặt sân (Tách padding ra thẻ div ngoài để không bị cắt chữ dòng 2) */}
                               {court.description && (
@@ -1012,16 +1148,19 @@ export default function FacilityManagementPage() {
                     </div>
                   )}
 
-                  {/* Thanh phân trang danh sách sân con */}
+                  {/* Thanh phân trang danh sách sân con nổi bật ở cuối danh sách */}
                   {totalCourtPages > 1 && (
-                    <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2">
-                      <span className="text-xs text-slate-500">
+                    <div className="mt-5 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <span className="text-xs text-slate-600">
                         Hiển thị sân{' '}
-                        <strong>{(courtPage - 1) * COURTS_PER_PAGE + 1}</strong> -{' '}
-                        <strong>
-                          {Math.min(courtPage * COURTS_PER_PAGE, filteredCourts.length)}
+                        <strong className="text-slate-900">
+                          {(courtPage - 1) * courtsPerPage + 1}
                         </strong>{' '}
-                        trên tổng <strong>{filteredCourts.length}</strong> sân con
+                        –{' '}
+                        <strong className="text-slate-900">
+                          {Math.min(courtPage * courtsPerPage, filteredCourts.length)}
+                        </strong>{' '}
+                        trên tổng số <strong className="text-emerald-700">{filteredCourts.length} sân con</strong>
                       </span>
 
                       <div className="flex items-center gap-1.5">
@@ -1029,7 +1168,7 @@ export default function FacilityManagementPage() {
                           type="button"
                           disabled={courtPage <= 1}
                           onClick={() => setCourtPage((p) => Math.max(1, p - 1))}
-                          className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
+                          className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer shadow-2xs"
                         >
                           ← Trang trước
                         </button>
@@ -1038,10 +1177,10 @@ export default function FacilityManagementPage() {
                             key={p}
                             type="button"
                             onClick={() => setCourtPage(p)}
-                            className={`w-8 h-8 rounded-xl text-xs font-bold cursor-pointer ${
+                            className={`w-9 h-9 rounded-xl text-xs font-bold cursor-pointer transition-all ${
                               p === courtPage
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100'
+                                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/25'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                             }`}
                           >
                             {p}
@@ -1051,7 +1190,7 @@ export default function FacilityManagementPage() {
                           type="button"
                           disabled={courtPage >= totalCourtPages}
                           onClick={() => setCourtPage((p) => Math.min(totalCourtPages, p + 1))}
-                          className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
+                          className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer shadow-2xs"
                         >
                           Trang sau →
                         </button>
