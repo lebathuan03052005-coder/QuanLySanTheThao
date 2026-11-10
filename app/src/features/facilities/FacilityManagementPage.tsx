@@ -12,33 +12,8 @@ import {
   type CourtItem,
 } from './facility.api';
 import { getAllSportsApi, type SportItem } from '../sports/sport.api';
-import { login } from '../auth/auth.api';
-import { useAuthStore, type User, type UserRole } from '../../shared/stores/authStore';
+import { useAuthStore } from '../../shared/stores/authStore';
 import { useNavigate } from 'react-router';
-
-const DEMO_OWNER_ACCOUNTS = [
-  {
-    email: 'owner@sportlink.vn',
-    password: 'password123',
-    shortName: 'Owner 1 (Man Thiện)',
-    fullName: 'Trần Chủ Sân',
-    subLabel: 'Cụm Bóng Đá Man Thiện & CLB Cầu Lông Hiệp Phú',
-  },
-  {
-    email: 'owner2@sportlink.vn',
-    password: 'password123',
-    shortName: 'Owner 2 (Khu CNC)',
-    fullName: 'Nguyễn Minh Hoàng',
-    subLabel: 'TT Pickleball & Tennis Khu CNC & Nhà Thi Đấu Bóng Rổ',
-  },
-  {
-    email: 'owner3@sportlink.vn',
-    password: 'password123',
-    shortName: 'Owner 3 (Làng ĐH)',
-    fullName: 'Lê Quốc Bảo',
-    subLabel: 'Tổ Hợp Thể Thao Đa Năng Làng Đại Học Thủ Đức',
-  },
-];
 
 /**
  * Chuẩn hóa chuỗi tiện ích từ database (hỗ trợ cả mảng JSON ["A", "B"] lẫn chuỗi "A, B")
@@ -124,13 +99,12 @@ function getSportVisual(sportName?: string) {
 
 export default function FacilityManagementPage() {
   const navigate = useNavigate();
-  const { user, setAuth } = useAuthStore();
+  const { user } = useAuthStore();
 
   // Danh sách cơ sở và môn thể thao
   const [facilities, setFacilities] = useState<FacilityItem[]>([]);
   const [sports, setSports] = useState<SportItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -243,34 +217,6 @@ export default function FacilityManagementPage() {
   function showToast(msg: string) {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3500);
-  }
-
-  // Chuyển nhanh giữa 3 tài khoản Chủ sân kiểm thử (owner, owner2, owner3)
-  async function handleQuickSwitchOwner(email: string, password: string) {
-    if (user?.email?.toLowerCase() === email.toLowerCase()) return;
-    setSwitchingAccount(email);
-    setErrorMsg(null);
-    try {
-      const res = await login({ email, password });
-      if (res && res.token) {
-        const raw = res.data || {};
-        const normalizedRole = ((raw.role || raw.Role || 'owner') as string).toLowerCase() as UserRole;
-        const authenticatedUser: User = {
-          id: raw.id ?? raw.Id ?? 0,
-          fullName: raw.fullName ?? raw.FullName ?? email,
-          email: raw.email ?? raw.Email ?? email,
-          role: normalizedRole,
-          avatarUrl: raw.avatarUrl ?? raw.avatar_url ?? null,
-        };
-        setAuth(authenticatedUser, res.token);
-        showToast(`Đã chuyển sang: ${authenticatedUser.fullName} (${email})`);
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Không thể chuyển tài khoản kiểm thử.';
-      setErrorMsg(msg);
-    } finally {
-      setSwitchingAccount(null);
-    }
   }
 
   // Lọc cơ sở theo từ khóa và trạng thái
@@ -520,36 +466,8 @@ export default function FacilityManagementPage() {
             </div>
           </div>
 
-          {/* Bộ nút chuyển Tab & Chuyển nhanh 3 tài khoản Chủ sân Test */}
+          {/* Bộ nút điều hướng & Thêm cơ sở mới */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Thanh chuyển nhanh 3 tài khoản Owner */}
-            <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
-              <span className="text-[11px] font-bold text-slate-500 px-2 hidden sm:inline">
-                Đổi tài khoản Test:
-              </span>
-              {DEMO_OWNER_ACCOUNTS.map((acc) => {
-                const isCurrent = user?.email?.toLowerCase() === acc.email.toLowerCase();
-                const isSwitching = switchingAccount === acc.email;
-
-                return (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    disabled={isCurrent || Boolean(switchingAccount)}
-                    onClick={() => handleQuickSwitchOwner(acc.email, acc.password)}
-                    title={`${acc.fullName} — ${acc.subLabel} (${acc.email} / MK: password123)`}
-                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                      isCurrent
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                    }`}
-                  >
-                    {isSwitching ? 'Đang chuyển...' : acc.shortName}
-                  </button>
-                );
-              })}
-            </div>
-
             {/* Nút sang Quản lý loại môn */}
             <button
               type="button"

@@ -145,10 +145,9 @@ export default function SportManagementPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  // Bộ lọc tìm kiếm, trạng thái môn, phạm vi sân & trạng thái sân con
+  // Bộ lọc tìm kiếm, trạng thái môn & trạng thái sân con
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [scopeFilter, setScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
   const [courtStatusFilter, setCourtStatusFilter] = useState<string>('ALL');
 
   // Phân trang danh sách môn thể thao
@@ -183,7 +182,7 @@ export default function SportManagementPage() {
   useEffect(() => {
     setCurrentPage(1);
     setCourtPageMap({});
-  }, [searchTerm, statusFilter, scopeFilter, courtStatusFilter, sportsPerPage]);
+  }, [searchTerm, statusFilter, courtStatusFilter, sportsPerPage]);
 
   async function loadSports() {
     setLoading(true);
@@ -213,15 +212,17 @@ export default function SportManagementPage() {
     return Number(court.owner_id) === Number(user.id);
   }
 
-  // Xử lý danh sách môn kèm các sân con đã lọc chi tiết
+  // Xử lý danh sách môn kèm các sân con thuộc quyền quản lý của Chủ sân hiện tại
   const processedSports = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
 
     return sports
       .map((sport) => {
         const rawCourts = sport.courts || [];
-        const filteredCourts = rawCourts.filter((c) => {
-          const matchScope = scopeFilter === 'ALL' || isMyCourt(c);
+        // Chỉ hiển thị các sân con thuộc quyền sở hữu của tài khoản Chủ sân đang đăng nhập
+        const myCourts = rawCourts.filter((c) => isMyCourt(c));
+
+        const filteredCourts = myCourts.filter((c) => {
           const matchCourtStatus =
             courtStatusFilter === 'ALL' || (c.status || 'ACTIVE').toUpperCase() === courtStatusFilter;
           const matchCourtText =
@@ -230,10 +231,9 @@ export default function SportManagementPage() {
             (sport.description && sport.description.toLowerCase().includes(q)) ||
             c.court_name.toLowerCase().includes(q) ||
             (c.facility_name && c.facility_name.toLowerCase().includes(q)) ||
-            (c.address && c.address.toLowerCase().includes(q)) ||
-            (c.owner_name && c.owner_name.toLowerCase().includes(q));
+            (c.address && c.address.toLowerCase().includes(q));
 
-          return matchScope && matchCourtStatus && matchCourtText;
+          return matchCourtStatus && matchCourtText;
         });
 
         const matchSportSelf =
@@ -251,17 +251,13 @@ export default function SportManagementPage() {
         const matchStatus = statusFilter === 'ALL' || sport.status === statusFilter;
         if (!matchStatus) return false;
 
-        if (scopeFilter === 'MINE' && sport.filteredCourts.length === 0 && (sport.courts?.length || 0) > 0) {
-          return false;
-        }
-
         if (searchTerm.trim()) {
           return sport.matchSportSelf || sport.filteredCourts.length > 0;
         }
 
         return true;
       });
-  }, [sports, searchTerm, statusFilter, scopeFilter, courtStatusFilter, user]);
+  }, [sports, searchTerm, statusFilter, courtStatusFilter, user]);
 
   // Tính toán phân trang danh sách môn
   const totalPages = Math.max(1, Math.ceil(processedSports.length / sportsPerPage));
@@ -270,17 +266,17 @@ export default function SportManagementPage() {
     return processedSports.slice(startIdx, startIdx + sportsPerPage);
   }, [processedSports, currentPage, sportsPerPage]);
 
-  // Thống kê KPI tổng quan
+  // Thống kê KPI theo các sân thuộc quyền sở hữu của Chủ sân đang đăng nhập
   const stats = useMemo(() => {
     const total = sports.length;
     const active = sports.filter((s) => s.status === 'ACTIVE').length;
     const inactive = sports.filter((s) => s.status === 'INACTIVE').length;
-    const allCourts = sports.flatMap((s) => s.courts || []);
-    const totalCourts = allCourts.length;
-    const activeCourts = allCourts.filter((c) => (c.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
-    const totalFacilities = new Set(allCourts.map((c) => c.facility_id).filter(Boolean)).size;
+    const myCourts = sports.flatMap((s) => s.courts || []).filter((c) => isMyCourt(c));
+    const totalCourts = myCourts.length;
+    const activeCourts = myCourts.filter((c) => (c.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
+    const totalFacilities = new Set(myCourts.map((c) => c.facility_id).filter(Boolean)).size;
     return { total, active, inactive, totalCourts, activeCourts, totalFacilities };
-  }, [sports]);
+  }, [sports, user]);
 
   function getSportCourtPage(sportId: number): number {
     return courtPageMap[sportId] || 1;
@@ -480,32 +476,6 @@ export default function SportManagementPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Lọc phạm vi sân */}
-          <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
-            <button
-              type="button"
-              onClick={() => setScopeFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                scopeFilter === 'ALL'
-                  ? 'bg-white text-emerald-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Toàn hệ thống
-            </button>
-            <button
-              type="button"
-              onClick={() => setScopeFilter('MINE')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                scopeFilter === 'MINE'
-                  ? 'bg-white text-emerald-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Sân thuộc cơ sở của tôi
-            </button>
-          </div>
-
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
