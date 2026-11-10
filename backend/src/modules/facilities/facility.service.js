@@ -1,106 +1,15 @@
 import { getPool } from '../../core/config/db.js';
 import { AppError } from '../../core/errors/AppError.js';
-import { ensureSportSchema } from '../sports/sport.service.js';
 
 /**
  * ============================================================================
  * SPORTLINK - FACILITY & SUB-COURT SERVICE
  * Đáp ứng đặc tả chức năng WBS 3.1 (S2-02): Quản lý cơ sở sân & danh sách sân con
  * - Mỗi tài khoản Chủ sân (OWNER) quản lý riêng các Cơ sở sân và Sân con của mình.
- * - Không ép tạo cơ sở mặc định rỗng cho mọi Owner; chỉ gom các sân mà Owner đó
- *   thực sự đang sở hữu trong bảng [courts].
- * - Khởi tạo sẵn 2 tài khoản Chủ sân mới (owner2@sportlink.vn, owner3@sportlink.vn)
- *   cùng bộ cơ sở & sân con riêng biệt để phục vụ kiểm thử phân tách dữ liệu.
+ * - Hoàn toàn không chạy DDL hay DML seed ngầm trong quá trình vận hành runtime
+ *   (đã tách riêng ra `npm run db:migrate` và `npm run db:seed`).
  * ============================================================================
  */
-
-let facilitySchemaReady = false;
-let facilitySchemaInitPromise = null;
-
-/**
- * Tự động kiểm tra cấu trúc bảng [facilities] và các cột mở rộng của [courts] (DDL).
- * KHÔNG tự động INSERT/UPDATE/DELETE hay ghi đè dữ liệu trong quá trình chạy server.
- * Việc nạp dữ liệu mẫu (3 tài khoản OWNER, cơ sở & 18 sân con/owner) được tách ra script độc lập:
- *   npm run seed:wbs31
- */
-export async function ensureFacilitySchema() {
-  await ensureSportSchema();
-  if (facilitySchemaReady) return;
-
-  if (!facilitySchemaInitPromise) {
-    facilitySchemaInitPromise = (async () => {
-      try {
-        const pool = await getPool();
-
-        // 1. Tạo bảng facilities nếu chưa tồn tại
-        await pool.request().query(`
-          IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'facilities')
-          BEGIN
-            CREATE TABLE [dbo].[facilities] (
-              [facility_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-              [owner_id] INT NOT NULL,
-              [name] NVARCHAR(150) NOT NULL,
-              [address] NVARCHAR(255) NOT NULL,
-              [phone] VARCHAR(20) NULL,
-              [description] NVARCHAR(MAX) NULL,
-              [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-              [created_at] DATETIME DEFAULT GETDATE(),
-              [updated_at] DATETIME DEFAULT GETDATE(),
-              CONSTRAINT [fk_facilities_owner] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id])
-            );
-          END
-        `);
-
-        // 2. Đảm bảo bảng courts có đủ các cột mở rộng
-        await pool.request().query(`
-          IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'facility_id')
-          BEGIN
-            ALTER TABLE [dbo].[courts] ADD [facility_id] INT NULL;
-          END
-
-          IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'capacity')
-          BEGIN
-            ALTER TABLE [dbo].[courts] ADD [capacity] INT NULL;
-          END
-
-          IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'images')
-          BEGIN
-            ALTER TABLE [dbo].[courts] ADD [images] NVARCHAR(MAX) NULL;
-          END
-
-          IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'created_at')
-          BEGIN
-            ALTER TABLE [dbo].[courts] ADD [created_at] DATETIME DEFAULT GETDATE();
-          END
-
-          IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'updated_at')
-          BEGIN
-            ALTER TABLE [dbo].[courts] ADD [updated_at] DATETIME DEFAULT GETDATE();
-          END
-
-          DECLARE @courtChkName NVARCHAR(256) = (
-            SELECT TOP 1 name FROM sys.check_constraints 
-            WHERE parent_object_id = OBJECT_ID('dbo.courts')
-              AND definition LIKE '%status%'
-              AND definition NOT LIKE '%MAINTENANCE%'
-          );
-          IF @courtChkName IS NOT NULL
-          BEGIN
-            EXEC('ALTER TABLE [dbo].[courts] DROP CONSTRAINT [' + @courtChkName + ']');
-            ALTER TABLE [dbo].[courts] WITH CHECK ADD CHECK ([status]='ACTIVE' OR [status]='INACTIVE' OR [status]='CLOSED' OR [status]='MAINTENANCE');
-          END
-        `);
-
-        facilitySchemaReady = true;
-      } catch (err) {
-        console.error('Cảnh báo đồng bộ schema bảng facilities/courts:', err.message);
-      } finally {
-        facilitySchemaInitPromise = null;
-      }
-    })();
-  }
-  await facilitySchemaInitPromise;
-}
 
 /**
  * Lấy danh sách cơ sở thuộc quyền quản lý của OWNER hiện tại kèm danh sách tóm tắt các sân con bên trong.
@@ -108,7 +17,6 @@ export async function ensureFacilitySchema() {
  * @param {{ search?: string, status?: string }} filters
  */
 export async function getOwnerFacilities(ownerId, filters = {}) {
-  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
   const { search = '', status = 'ALL' } = filters;
 
@@ -163,20 +71,23 @@ export async function getOwnerFacilities(ownerId, filters = {}) {
   let courtsByFacMap = {};
 
   if (facIds.length > 0) {
-    const courtsRes = await pool.request().query(`
-      SELECT 
-        c.court_id,
-        c.facility_id,
-        c.court_name,
-        c.sport_id,
-        ISNULL(s.sport_name, N'Thể thao') AS sport_name,
-        ISNULL(c.capacity, 10) AS capacity,
-        ISNULL(c.status, 'ACTIVE') AS status
-      FROM courts c
-      LEFT JOIN sports s ON c.sport_id = s.sport_id
-      WHERE c.facility_id IN (${facIds.join(',')})
-      ORDER BY c.court_id ASC
-    `);
+    const courtsRes = await pool.request()
+      .input('ownerId', ownerId)
+      .query(`
+        SELECT 
+          c.court_id,
+          c.facility_id,
+          c.court_name,
+          c.sport_id,
+          COALESCE(os.custom_name, s.sport_name, N'Thể thao') AS sport_name,
+          ISNULL(c.capacity, 10) AS capacity,
+          ISNULL(c.status, 'ACTIVE') AS status
+        FROM courts c
+        LEFT JOIN sports s ON c.sport_id = s.sport_id
+        LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
+        WHERE c.facility_id IN (${facIds.join(',')})
+        ORDER BY c.court_id ASC
+      `);
 
     for (const c of courtsRes.recordset) {
       if (!courtsByFacMap[c.facility_id]) {
@@ -200,7 +111,6 @@ export async function getOwnerFacilities(ownerId, filters = {}) {
  * @param {number} ownerId
  */
 export async function getFacilityById(facilityId, ownerId) {
-  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
   const result = await pool.request()
     .input('facilityId', facilityId)
@@ -239,7 +149,6 @@ export async function getFacilityById(facilityId, ownerId) {
  * @param {{ name: string, address: string, phone?: string, description?: string }} data
  */
 export async function createFacility(ownerId, data) {
-  await ensureFacilitySchema(ownerId);
   const { name, address, phone = '', description = '' } = data;
 
   if (!name || !name.trim()) {
@@ -277,7 +186,6 @@ export async function createFacility(ownerId, data) {
  * @param {{ name?: string, address?: string, phone?: string, description?: string }} data
  */
 export async function updateFacility(facilityId, ownerId, data) {
-  await ensureFacilitySchema(ownerId);
   const { name, address, phone, description } = data;
 
   await getFacilityById(facilityId, ownerId);
@@ -327,7 +235,6 @@ export async function updateFacility(facilityId, ownerId, data) {
  * @param {'ACTIVE' | 'INACTIVE'} status
  */
 export async function updateFacilityStatus(facilityId, ownerId, status) {
-  await ensureFacilitySchema(ownerId);
   const normalizedStatus = (status || '').toUpperCase();
   if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
     throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);
@@ -375,7 +282,7 @@ export async function getCourtsByFacility(facilityId, ownerId, filters = {}) {
       f.name AS facility_name,
       c.owner_id,
       c.sport_id,
-      s.sport_name,
+      COALESCE(os.custom_name, s.sport_name) AS sport_name,
       c.court_name,
       c.address,
       ISNULL(c.capacity, 10) AS capacity,
@@ -388,6 +295,7 @@ export async function getCourtsByFacility(facilityId, ownerId, filters = {}) {
     FROM courts c
     LEFT JOIN facilities f ON c.facility_id = f.facility_id
     LEFT JOIN sports s ON c.sport_id = s.sport_id
+    LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
     WHERE c.facility_id = @facilityId
   `;
 
@@ -401,7 +309,9 @@ export async function getCourtsByFacility(facilityId, ownerId, filters = {}) {
 
   query += ` ORDER BY c.court_id ASC`;
 
-  const request = pool.request().input('facilityId', facilityId);
+  const request = pool.request()
+    .input('facilityId', facilityId)
+    .input('ownerId', ownerId);
 
   if (status && status !== 'ALL') {
     request.input('status', status);
@@ -436,13 +346,23 @@ export async function createCourtInFacility(facilityId, ownerId, data) {
 
   const sportRes = await pool.request()
     .input('sportId', parseInt(sportId))
-    .query('SELECT * FROM sports WHERE sport_id = @sportId');
+    .input('ownerId', ownerId)
+    .query(`
+      SELECT 
+        s.sport_id,
+        s.owner_id,
+        COALESCE(os.status, s.status, 'ACTIVE') AS effective_status
+      FROM sports s
+      LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
+      WHERE s.sport_id = @sportId
+        AND (s.owner_id IS NULL OR s.owner_id = @ownerId)
+    `);
 
   if (sportRes.recordset.length === 0) {
     throw new AppError('Môn thể thao được chọn không tồn tại trong hệ thống.', 404);
   }
   const sport = sportRes.recordset[0];
-  if (sport.status && sport.status.toUpperCase() === 'INACTIVE') {
+  if (sport.effective_status && sport.effective_status.toUpperCase() === 'INACTIVE') {
     throw new AppError('Không thể tạo sân cho môn thể thao đã ngừng hoạt động.', 400);
   }
 
@@ -500,7 +420,6 @@ export async function createCourtInFacility(facilityId, ownerId, data) {
  * @param {{ courtName?: string, sportId?: number, capacity?: number, description?: string, utilities?: string, images?: string }} data
  */
 export async function updateCourtInFacility(courtId, ownerId, data) {
-  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
 
   const checkCourt = await pool.request()
@@ -530,7 +449,11 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
   if (sportId !== undefined) {
     const sportRes = await pool.request()
       .input('sportId', parseInt(sportId))
-      .query('SELECT * FROM sports WHERE sport_id = @sportId');
+      .input('ownerId', ownerId)
+      .query(`
+        SELECT sport_id FROM sports
+        WHERE sport_id = @sportId AND (owner_id IS NULL OR owner_id = @ownerId)
+      `);
     if (sportRes.recordset.length === 0) {
       throw new AppError('Môn thể thao không tồn tại.', 404);
     }
@@ -568,7 +491,6 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
  * @param {'ACTIVE' | 'INACTIVE'} status
  */
 export async function updateCourtStatus(courtId, ownerId, status) {
-  await ensureFacilitySchema(ownerId);
   const normalizedStatus = (status || '').toUpperCase();
   if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
     throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);
@@ -605,7 +527,3 @@ export async function updateCourtStatus(courtId, ownerId, status) {
 
   return result.recordset[0];
 }
-
-// Tự động đồng bộ schema và khởi tạo 3 tài khoản Chủ sân mẫu ngay khi khởi động server
-ensureFacilitySchema().catch(() => {});
-

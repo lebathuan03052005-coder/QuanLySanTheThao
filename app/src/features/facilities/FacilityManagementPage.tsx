@@ -11,7 +11,7 @@ import {
   type FacilityItem,
   type CourtItem,
 } from './facility.api';
-import { getAllSportsApi, type SportItem } from '../sports/sport.api';
+import { getOwnerSportsApi, type SportItem } from '../sports/sport.api';
 import { useAuthStore } from '../../shared/stores/authStore';
 import { useNavigate } from 'react-router';
 
@@ -185,7 +185,7 @@ export default function FacilityManagementPage() {
     try {
       const [facData, sportData] = await Promise.all([
         getOwnerFacilitiesApi(),
-        getAllSportsApi({ status: 'ACTIVE' }),
+        getOwnerSportsApi({ status: 'ACTIVE' }),
       ]);
       setFacilities(facData);
       setSports(sportData);
@@ -383,9 +383,15 @@ export default function FacilityManagementPage() {
     setIsCourtModalOpen(true);
   }
 
-  function handleOpenEditCourt(court: CourtItem) {
+  function handleOpenEditCourt(court: CourtItem & { facility_name?: string }) {
     setEditingCourt(court);
-    setTargetFacilityForCourt(selectedFacility);
+    const matchedFacility =
+      facilities.find((f) => Number(f.facility_id) === Number(court.facility_id)) ||
+      (court.facility_name
+        ? facilities.find((f) => f.name === court.facility_name)
+        : undefined) ||
+      selectedFacility;
+    setTargetFacilityForCourt(matchedFacility || null);
     setCourtForm({
       courtName: court.court_name,
       sportId: court.sport_id,
@@ -1321,11 +1327,12 @@ export default function FacilityManagementPage() {
                 <h3 className="text-xl font-bold text-slate-900">
                   {editingCourt ? 'Chỉnh Sửa Sân Con' : 'Thêm Sân Con Vào Cơ Sở'}
                 </h3>
-                {targetFacilityForCourt && (
-                  <p className="text-xs text-emerald-600 font-semibold mt-0.5">
-                    Cơ sở: {targetFacilityForCourt.name}
-                  </p>
-                )}
+                <p className="text-xs text-emerald-600 font-semibold mt-0.5">
+                  Cơ sở:{' '}
+                  {targetFacilityForCourt?.name ||
+                    (editingCourt as { facility_name?: string } | null)?.facility_name ||
+                    'Chưa chọn cơ sở'}
+                </p>
               </div>
               <button
                 type="button"
@@ -1343,6 +1350,40 @@ export default function FacilityManagementPage() {
             )}
 
             <form onSubmit={handleSubmitCourt} className="mt-5 flex flex-col gap-4">
+              {!editingCourt && (isAllFacilitiesMode || facilities.length > 1) && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                    Chọn cơ sở sân đích <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={targetFacilityForCourt?.facility_id || ''}
+                    onChange={(e) => {
+                      const nextFac = facilities.find(
+                        (f) => Number(f.facility_id) === Number(e.target.value)
+                      );
+                      if (nextFac) {
+                        setTargetFacilityForCourt(nextFac);
+                        if (/^Sân \d+ -\s*$/.test(courtForm.courtName)) {
+                          const nextNum = Number(nextFac.total_courts || 0) + 1;
+                          setCourtForm((prev) => ({
+                            ...prev,
+                            courtName: `Sân ${nextNum} - `,
+                          }));
+                        }
+                      }
+                    }}
+                    aria-label="Chọn cơ sở sân đích"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:bg-white text-slate-800"
+                  >
+                    {facilities.map((f) => (
+                      <option key={f.facility_id} value={f.facility_id}>
+                        {f.name} ({f.total_courts || 0} sân con)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
                   Tên sân con (Đánh số Sân 1, Sân 2...) <span className="text-red-500">*</span>

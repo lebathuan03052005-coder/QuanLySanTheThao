@@ -5,64 +5,19 @@ import { AppError } from '../../core/errors/AppError.js';
  * ============================================================================
  * SPORTLINK - SPORT TYPE MANAGEMENT SERVICE
  * Đáp ứng đặc tả chức năng WBS 3.1 (S2-03): Quản lý loại môn thể thao (thiết kế mở rộng)
- * Trả về chi tiết từng môn thể thao kèm danh sách đầy đủ các sân con, cơ sở sân,
- * chủ sân quản lý và trạng thái hoạt động chi tiết của từng sân.
+ * - GET /api/sports: trả danh mục môn thể thao công khai (không trả danh sách sân nội bộ của các owner).
+ * - GET /api/sports/owner: trả danh mục môn thể thao kèm chi tiết các sân con thuộc đúng owner_id đang đăng nhập.
+ * - POST / PUT / PATCH /api/sports: giữ đầy đủ quyền Thêm / Sửa / Khóa / Mở lại cho OWNER,
+ *   nhưng cô lập phạm vi theo từng Owner (qua owner_id và bảng owner_sports) để không ảnh hưởng chéo.
  * ============================================================================
  */
 
-let sportSchemaReady = false;
-
 /**
- * Đảm bảo bảng [sports] có đầy đủ các cột mở rộng (status, created_at, updated_at).
- * Chỉ kiểm tra cấu trúc bảng/cột (DDL), KHÔNG tự động INSERT/UPDATE/DELETE dữ liệu khi chạy server.
- * Dữ liệu mẫu được tách riêng sang script độc lập: `npm run seed:wbs31`
- */
-export async function ensureSportSchema() {
-  if (sportSchemaReady) return;
-  const pool = await getPool();
-
-  try {
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'sports')
-      BEGIN
-        CREATE TABLE [dbo].[sports] (
-          [sport_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-          [sport_name] NVARCHAR(100) NOT NULL,
-          [description] NVARCHAR(500) NULL,
-          [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-          [created_at] DATETIME DEFAULT GETDATE(),
-          [updated_at] DATETIME DEFAULT GETDATE()
-        );
-      END
-
-      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'status')
-      BEGIN
-        ALTER TABLE [dbo].[sports] ADD [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';
-      END
-
-      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'created_at')
-      BEGIN
-        ALTER TABLE [dbo].[sports] ADD [created_at] DATETIME DEFAULT GETDATE();
-      END
-
-      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'updated_at')
-      BEGIN
-        ALTER TABLE [dbo].[sports] ADD [updated_at] DATETIME DEFAULT GETDATE();
-      END
-    `);
-
-    sportSchemaReady = true;
-  } catch (err) {
-    console.error('Cảnh báo đồng bộ schema bảng sports:', err.message);
-  }
-}
-
-/**
- * Lấy danh sách loại môn thể thao kèm chi tiết tất cả các sân con (thuộc cơ sở nào, chủ sân nào, trạng thái hoạt động ra sao).
+ * Lấy danh mục loại môn thể thao công khai (phục vụ dropdown chọn môn & trang Player).
+ * Không trả danh sách sân nội bộ hoặc email của các chủ sân.
  * @param {{ search?: string, status?: string }} filters
  */
 export async function getAllSports(filters = {}) {
-  await ensureSportSchema();
   const pool = await getPool();
   const { search = '', status = 'ALL' } = filters;
 
@@ -72,10 +27,11 @@ export async function getAllSports(filters = {}) {
       s.sport_name,
       s.description,
       COALESCE(s.status, 'ACTIVE') AS status,
+      s.owner_id,
       s.created_at,
       s.updated_at
     FROM sports s
-    WHERE 1=1
+    WHERE s.owner_id IS NULL
   `;
 
   if (status && status !== 'ALL') {
@@ -97,12 +53,59 @@ export async function getAllSports(filters = {}) {
   }
 
   const sportsResult = await request.query(query);
+  return sportsResult.recordset;
+}
+
+/**
+ * Lấy danh sách loại môn thể thao dành riêng cho Chủ sân đang đăng nhập (`/api/sports/owner`).
+ * - Chỉ tính toán và trả về các sân con có `c.owner_id = @ownerId` (không lộ sân hay email của chủ sân khác).
+ * - Kết hợp cấu hình riêng của chủ sân trong `owner_sports` để việc Sửa/Khóa môn của Owner A không ảnh hưởng Owner B.
+ * @param {number} ownerId
+ * @param {{ search?: string, status?: string }} filters
+ */
+export async function getOwnerSports(ownerId, filters = {}) {
+  const pool = await getPool();
+  const { search = '', status = 'ALL' } = filters;
+
+  let query = `
+    SELECT 
+      s.sport_id,
+      COALESCE(os.custom_name, s.sport_name) AS sport_name,
+      COALESCE(os.custom_description, s.description) AS description,
+      COALESCE(os.status, s.status, 'ACTIVE') AS status,
+      s.owner_id,
+      s.created_at,
+      COALESCE(os.updated_at, s.updated_at) AS updated_at
+    FROM sports s
+    LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
+    WHERE (s.owner_id IS NULL OR s.owner_id = @ownerId)
+  `;
+
+  if (status && status !== 'ALL') {
+    query += ` AND COALESCE(os.status, s.status, 'ACTIVE') = @status`;
+  }
+
+  if (search && search.trim()) {
+    query += ` AND (COALESCE(os.custom_name, s.sport_name) LIKE @search OR COALESCE(os.custom_description, s.description) LIKE @search)`;
+  }
+
+  query += ` ORDER BY s.sport_id ASC`;
+
+  const request = pool.request().input('ownerId', ownerId);
+  if (status && status !== 'ALL') {
+    request.input('status', status.toUpperCase());
+  }
+  if (search && search.trim()) {
+    request.input('search', `%${search.trim()}%`);
+  }
+
+  const sportsResult = await request.query(query);
   const sportsList = sportsResult.recordset;
 
-  // Lấy toàn bộ danh sách sân con kèm thông tin cơ sở và chủ sân để gắn chi tiết vào từng môn thể thao
-  let courtsList = [];
-  try {
-    const courtsRes = await pool.request().query(`
+  // Chỉ lấy danh sách sân con thuộc quyền sở hữu của chính Owner đang đăng nhập (c.owner_id = @ownerId)
+  const courtsRes = await pool.request()
+    .input('ownerId', ownerId)
+    .query(`
       SELECT 
         c.court_id,
         c.sport_id,
@@ -113,7 +116,6 @@ export async function getAllSports(filters = {}) {
         ISNULL(f.status, 'ACTIVE') AS facility_status,
         c.owner_id,
         ISNULL(u.full_name, N'Chủ sân SportLink') AS owner_name,
-        ISNULL(u.email, '') AS owner_email,
         ISNULL(c.capacity, 10) AS capacity,
         c.utilities,
         c.description,
@@ -121,32 +123,11 @@ export async function getAllSports(filters = {}) {
       FROM courts c
       LEFT JOIN facilities f ON c.facility_id = f.facility_id
       LEFT JOIN users u ON c.owner_id = u.user_id
+      WHERE c.owner_id = @ownerId
       ORDER BY c.facility_id ASC, c.court_id ASC
     `);
-    courtsList = courtsRes.recordset;
-  } catch {
-    // Fallback nếu bảng facilities chưa được khởi tạo
-    const fallbackRes = await pool.request().query(`
-      SELECT 
-        c.court_id,
-        c.sport_id,
-        c.court_name,
-        NULL AS facility_id,
-        N'Cơ sở độc lập' AS facility_name,
-        c.address,
-        'ACTIVE' AS facility_status,
-        c.owner_id,
-        N'Chủ sân SportLink' AS owner_name,
-        '' AS owner_email,
-        10 AS capacity,
-        c.utilities,
-        c.description,
-        ISNULL(c.status, 'ACTIVE') AS status
-      FROM courts c
-      ORDER BY c.court_id ASC
-    `);
-    courtsList = fallbackRes.recordset;
-  }
+
+  const courtsList = courtsRes.recordset;
 
   return sportsList.map((sp) => {
     const appliedCourts = courtsList.filter((c) => c.sport_id === sp.sport_id);
@@ -168,25 +149,42 @@ export async function getAllSports(filters = {}) {
 }
 
 /**
- * Lấy chi tiết một môn thể thao theo ID kèm danh sách sân con.
+ * Lấy chi tiết một môn thể thao theo ID (hỗ trợ truyền kèm ownerId nếu cần lấy góc nhìn của Owner).
  * @param {number} sportId
+ * @param {number | null} [ownerId]
  */
-export async function getSportById(sportId) {
-  const all = await getAllSports();
-  const sport = all.find((s) => s.sport_id === sportId);
-  if (!sport) {
+export async function getSportById(sportId, ownerId = null) {
+  if (ownerId !== null && ownerId !== undefined) {
+    const ownerSports = await getOwnerSports(ownerId);
+    const found = ownerSports.find((s) => s.sport_id === sportId);
+    if (!found) {
+      throw new AppError('Không tìm thấy môn thể thao này.', 404);
+    }
+    return found;
+  }
+
+  const pool = await getPool();
+  const res = await pool.request()
+    .input('sportId', sportId)
+    .query(`
+      SELECT sport_id, sport_name, description, COALESCE(status, 'ACTIVE') AS status, owner_id, created_at, updated_at
+      FROM sports
+      WHERE sport_id = @sportId
+    `);
+
+  if (res.recordset.length === 0) {
     throw new AppError('Không tìm thấy môn thể thao này.', 404);
   }
-  return sport;
+  return res.recordset[0];
 }
 
 /**
  * Thêm mới một loại môn thể thao.
- * Kiểm tra tên bắt buộc và chống trùng lặp không phân biệt hoa thường.
+ * - Khi Owner tạo môn mới, gắn `owner_id = user.id` để chỉ Owner đó (và Admin) quản lý, không làm nhiễu danh mục của Owner khác.
  * @param {{ sportName: string, description?: string }} data
+ * @param {{ id?: number, role?: string }} [user]
  */
-export async function createSport(data) {
-  await ensureSportSchema();
+export async function createSport(data, user = null) {
   const { sportName, description = '' } = data;
 
   if (!sportName || !sportName.trim()) {
@@ -194,24 +192,33 @@ export async function createSport(data) {
   }
 
   const cleanName = sportName.trim();
+  const ownerId = user?.id !== undefined && user?.id !== null ? Number(user.id) : null;
   const pool = await getPool();
 
-  // Kiểm tra trùng tên (case-insensitive & chuẩn hóa khoảng trắng)
+  // Kiểm tra trùng tên trong phạm vi môn chung hoặc môn của chính Owner đó
   const existing = await pool.request()
     .input('sportName', cleanName)
-    .query('SELECT sport_id FROM sports WHERE LOWER(LTRIM(RTRIM(sport_name))) = LOWER(@sportName)');
+    .input('ownerId', ownerId)
+    .query(`
+      SELECT s.sport_id
+      FROM sports s
+      LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
+      WHERE (s.owner_id IS NULL OR s.owner_id = @ownerId)
+        AND LOWER(LTRIM(RTRIM(COALESCE(os.custom_name, s.sport_name)))) = LOWER(@sportName)
+    `);
 
   if (existing.recordset.length > 0) {
-    throw new AppError(`Môn thể thao "${cleanName}" đã tồn tại trong hệ thống.`, 409);
+    throw new AppError(`Môn thể thao "${cleanName}" đã tồn tại trong danh mục của bạn.`, 409);
   }
 
   const result = await pool.request()
     .input('sportName', cleanName)
     .input('description', description.trim())
+    .input('ownerId', ownerId)
     .query(`
-      INSERT INTO sports (sport_name, description, status, created_at, updated_at)
+      INSERT INTO sports (sport_name, description, status, owner_id, created_at, updated_at)
       OUTPUT INSERTED.*
-      VALUES (@sportName, @description, 'ACTIVE', GETDATE(), GETDATE())
+      VALUES (@sportName, @description, 'ACTIVE', @ownerId, GETDATE(), GETDATE())
     `);
 
   const inserted = result.recordset[0];
@@ -226,16 +233,27 @@ export async function createSport(data) {
 }
 
 /**
- * Cập nhật thông tin môn thể thao.
+ * Cập nhật thông tin môn thể thao (cô lập theo từng Owner).
+ * - Nếu môn là môn hệ thống chung (`owner_id IS NULL`) và người sửa là Owner: lưu bản ghi tùy chỉnh vào `owner_sports`
+ *   của riêng Owner đó để không làm đổi tên/mô tả môn của các Owner khác.
+ * - Nếu môn là môn riêng của một Owner (`owner_id IS NOT NULL`): kiểm tra đúng `owner_id` rồi cập nhật trực tiếp.
  * @param {number} sportId
  * @param {{ sportName?: string, description?: string }} data
+ * @param {{ id?: number, role?: string }} [user]
  */
-export async function updateSport(sportId, data) {
-  await ensureSportSchema();
+export async function updateSport(sportId, data, user = null) {
   const { sportName, description } = data;
+  const ownerId = user?.id !== undefined && user?.id !== null ? Number(user.id) : null;
+  const isAdmin = (user?.role || '').toLowerCase() === 'admin';
   const pool = await getPool();
 
-  await getSportById(sportId);
+  const rawSport = await getSportById(sportId);
+
+  if (rawSport.owner_id !== null && rawSport.owner_id !== undefined) {
+    if (ownerId !== null && !isAdmin && Number(rawSport.owner_id) !== ownerId) {
+      throw new AppError('Bạn không có quyền chỉnh sửa môn thể thao của chủ sân khác.', 403);
+    }
+  }
 
   if (sportName !== undefined) {
     if (!sportName.trim()) {
@@ -246,9 +264,14 @@ export async function updateSport(sportId, data) {
     const duplicate = await pool.request()
       .input('id', sportId)
       .input('sportName', cleanName)
+      .input('ownerId', ownerId)
       .query(`
-        SELECT sport_id FROM sports 
-        WHERE LOWER(LTRIM(RTRIM(sport_name))) = LOWER(@sportName) AND sport_id <> @id
+        SELECT s.sport_id
+        FROM sports s
+        LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
+        WHERE s.sport_id <> @id
+          AND (s.owner_id IS NULL OR s.owner_id = @ownerId)
+          AND LOWER(LTRIM(RTRIM(COALESCE(os.custom_name, s.sport_name)))) = LOWER(@sportName)
       `);
 
     if (duplicate.recordset.length > 0) {
@@ -256,6 +279,33 @@ export async function updateSport(sportId, data) {
     }
   }
 
+  // Nếu là môn chung (owner_id IS NULL) và có thông tin Owner đang đăng nhập -> Lưu riêng vào bảng owner_sports
+  if ((rawSport.owner_id === null || rawSport.owner_id === undefined) && ownerId !== null && !isAdmin) {
+    await pool.request()
+      .input('ownerId', ownerId)
+      .input('sportId', sportId)
+      .input('customName', sportName ? sportName.trim() : null)
+      .input('customDesc', description !== undefined ? description.trim() : null)
+      .query(`
+        IF EXISTS (SELECT 1 FROM owner_sports WHERE owner_id = @ownerId AND sport_id = @sportId)
+        BEGIN
+          UPDATE owner_sports
+          SET custom_name = COALESCE(@customName, custom_name),
+              custom_description = COALESCE(@customDesc, custom_description),
+              updated_at = GETDATE()
+          WHERE owner_id = @ownerId AND sport_id = @sportId;
+        END
+        ELSE
+        BEGIN
+          INSERT INTO owner_sports (owner_id, sport_id, custom_name, custom_description, status, updated_at)
+          VALUES (@ownerId, @sportId, @customName, @customDesc, 'ACTIVE', GETDATE());
+        END
+      `);
+
+    return await getSportById(sportId, ownerId);
+  }
+
+  // Trường hợp môn riêng của Owner hoặc gọi từ Admin / Unit test không truyền user
   await pool.request()
     .input('id', sportId)
     .input('sportName', sportName ? sportName.trim() : null)
@@ -269,24 +319,57 @@ export async function updateSport(sportId, data) {
       WHERE sport_id = @id
     `);
 
-  return await getSportById(sportId);
+  return await getSportById(sportId, ownerId);
 }
 
 /**
- * Ngừng hoạt động hoặc kích hoạt lại môn thể thao (Soft toggle).
+ * Ngừng hoạt động hoặc kích hoạt lại môn thể thao (cô lập theo từng Owner).
+ * - Khi Owner A khóa một môn chung (ví dụ "Bóng đá"), chỉ khóa trong phạm vi của Owner A (qua `owner_sports`),
+ *   không làm khóa môn "Bóng đá" của Owner B.
  * @param {number} sportId
  * @param {'ACTIVE' | 'INACTIVE'} status
+ * @param {{ id?: number, role?: string }} [user]
  */
-export async function updateSportStatus(sportId, status) {
-  await ensureSportSchema();
+export async function updateSportStatus(sportId, status, user = null) {
   const normalizedStatus = (status || '').toUpperCase();
   if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
     throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);
   }
 
-  await getSportById(sportId);
+  const ownerId = user?.id !== undefined && user?.id !== null ? Number(user.id) : null;
+  const isAdmin = (user?.role || '').toLowerCase() === 'admin';
+  const rawSport = await getSportById(sportId);
+
+  if (rawSport.owner_id !== null && rawSport.owner_id !== undefined) {
+    if (ownerId !== null && !isAdmin && Number(rawSport.owner_id) !== ownerId) {
+      throw new AppError('Bạn không có quyền thay đổi trạng thái môn thể thao của chủ sân khác.', 403);
+    }
+  }
 
   const pool = await getPool();
+
+  if ((rawSport.owner_id === null || rawSport.owner_id === undefined) && ownerId !== null && !isAdmin) {
+    await pool.request()
+      .input('ownerId', ownerId)
+      .input('sportId', sportId)
+      .input('status', normalizedStatus)
+      .query(`
+        IF EXISTS (SELECT 1 FROM owner_sports WHERE owner_id = @ownerId AND sport_id = @sportId)
+        BEGIN
+          UPDATE owner_sports
+          SET status = @status, updated_at = GETDATE()
+          WHERE owner_id = @ownerId AND sport_id = @sportId;
+        END
+        ELSE
+        BEGIN
+          INSERT INTO owner_sports (owner_id, sport_id, status, updated_at)
+          VALUES (@ownerId, @sportId, @status, GETDATE());
+        END
+      `);
+
+    return await getSportById(sportId, ownerId);
+  }
+
   await pool.request()
     .input('id', sportId)
     .input('status', normalizedStatus)
@@ -296,5 +379,5 @@ export async function updateSportStatus(sportId, status) {
       WHERE sport_id = @id
     `);
 
-  return await getSportById(sportId);
+  return await getSportById(sportId, ownerId);
 }

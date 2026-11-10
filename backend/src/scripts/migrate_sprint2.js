@@ -1,10 +1,53 @@
 import { getPool } from '../core/config/db.js';
 
+/**
+ * ============================================================================
+ * SCRIPT MIGRATION SPRINT 2 (CHỈ CHỨA DDL - CHẠY 1 LẦN KHI CẬP NHẬT SCHEMA)
+ * Cách chạy:
+ *   cd backend
+ *   npm run db:migrate
+ * ============================================================================
+ */
 export async function runSprint2Migration() {
   const pool = await getPool();
-  console.log('--- Bắt đầu Migration Sprint 2: Facilities, Courts & Sports ---');
+  console.log('--- Bắt đầu Migration Sprint 2 (DDL): Users, Staff, Facilities, Courts & Sports ---');
 
-  // 1. Tạo bảng facilities nếu chưa tồn tại
+  // 1. Đồng bộ các cột mở rộng của bảng [users] và bảng [court_staff]
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'avatar_url')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [avatar_url] NVARCHAR(500) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'status')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'owner_id')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [owner_id] INT NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'job_title')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [job_title] NVARCHAR(100) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE object_id = OBJECT_ID(N'[dbo].[court_staff]'))
+    BEGIN
+      CREATE TABLE [dbo].[court_staff] (
+        [assignment_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        [staff_id] INT NOT NULL,
+        [court_id] INT NOT NULL,
+        [assigned_by] INT NOT NULL,
+        [assigned_at] DATETIME DEFAULT GETDATE(),
+        CONSTRAINT [unique_staff_court] UNIQUE NONCLUSTERED ([staff_id] ASC, [court_id] ASC)
+      );
+    END
+  `);
+
+  // 2. Tạo bảng [facilities] nếu chưa tồn tại
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'facilities')
     BEGIN
@@ -20,99 +63,101 @@ export async function runSprint2Migration() {
         [updated_at] DATETIME DEFAULT GETDATE(),
         CONSTRAINT [fk_facilities_owner] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id])
       );
-      PRINT 'Đã tạo bảng facilities';
     END
   `);
 
-  // 2. Cập nhật các cột bổ sung cho bảng courts
+  // 3. Cập nhật các cột bổ sung cho bảng [courts]
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'facility_id')
     BEGIN
       ALTER TABLE [dbo].[courts] ADD [facility_id] INT NULL;
-      ALTER TABLE [dbo].[courts] ADD CONSTRAINT [fk_courts_facility] FOREIGN KEY ([facility_id]) REFERENCES [dbo].[facilities]([facility_id]);
-      PRINT 'Đã thêm cột facility_id vào courts';
     END
 
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'capacity')
     BEGIN
       ALTER TABLE [dbo].[courts] ADD [capacity] INT NULL;
-      PRINT 'Đã thêm cột capacity vào courts';
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'images')
+    BEGIN
+      ALTER TABLE [dbo].[courts] ADD [images] NVARCHAR(MAX) NULL;
     END
 
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'created_at')
     BEGIN
       ALTER TABLE [dbo].[courts] ADD [created_at] DATETIME DEFAULT GETDATE();
-      PRINT 'Đã thêm cột created_at vào courts';
     END
 
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'updated_at')
     BEGIN
       ALTER TABLE [dbo].[courts] ADD [updated_at] DATETIME DEFAULT GETDATE();
-      PRINT 'Đã thêm cột updated_at vào courts';
     END
 
-    -- Cập nhật ràng buộc status cho courts để hỗ trợ đầy đủ ACTIVE, INACTIVE, CLOSED, MAINTENANCE
     DECLARE @courtChkName NVARCHAR(256) = (
-      SELECT name FROM sys.check_constraints 
-      WHERE parent_object_id = OBJECT_ID('dbo.courts') AND definition LIKE '%status%'
+      SELECT TOP 1 name FROM sys.check_constraints 
+      WHERE parent_object_id = OBJECT_ID('dbo.courts')
+        AND definition LIKE '%status%'
+        AND definition NOT LIKE '%MAINTENANCE%'
     );
     IF @courtChkName IS NOT NULL
     BEGIN
-      EXEC('ALTER TABLE [dbo].[courts] DROP CONSTRAINT ' + @courtChkName);
+      EXEC('ALTER TABLE [dbo].[courts] DROP CONSTRAINT [' + @courtChkName + ']');
       ALTER TABLE [dbo].[courts] WITH CHECK ADD CHECK ([status]='ACTIVE' OR [status]='INACTIVE' OR [status]='CLOSED' OR [status]='MAINTENANCE');
-      PRINT 'Đã cập nhật ràng buộc status cho bảng courts';
     END
   `);
 
-  // 3. Cập nhật các cột bổ sung cho bảng sports
+  // 4. Cập nhật các cột bổ sung cho bảng [sports] và bảng cấu hình riêng theo chủ sân [owner_sports]
   await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'sports')
+    BEGIN
+      CREATE TABLE [dbo].[sports] (
+        [sport_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        [sport_name] NVARCHAR(100) NOT NULL,
+        [description] NVARCHAR(500) NULL,
+        [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+        [owner_id] INT NULL,
+        [created_at] DATETIME DEFAULT GETDATE(),
+        [updated_at] DATETIME DEFAULT GETDATE()
+      );
+    END
+
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'status')
     BEGIN
       ALTER TABLE [dbo].[sports] ADD [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';
-      PRINT 'Đã thêm cột status vào sports';
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'owner_id')
+    BEGIN
+      ALTER TABLE [dbo].[sports] ADD [owner_id] INT NULL;
     END
 
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'created_at')
     BEGIN
       ALTER TABLE [dbo].[sports] ADD [created_at] DATETIME DEFAULT GETDATE();
-      PRINT 'Đã thêm cột created_at vào sports';
     END
 
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'updated_at')
     BEGIN
       ALTER TABLE [dbo].[sports] ADD [updated_at] DATETIME DEFAULT GETDATE();
-      PRINT 'Đã thêm cột updated_at vào sports';
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'owner_sports')
+    BEGIN
+      CREATE TABLE [dbo].[owner_sports] (
+        [owner_id] INT NOT NULL,
+        [sport_id] INT NOT NULL,
+        [custom_name] NVARCHAR(100) NULL,
+        [custom_description] NVARCHAR(500) NULL,
+        [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+        [updated_at] DATETIME DEFAULT GETDATE(),
+        CONSTRAINT [pk_owner_sports] PRIMARY KEY CLUSTERED ([owner_id] ASC, [sport_id] ASC),
+        CONSTRAINT [fk_owner_sports_user] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id]),
+        CONSTRAINT [fk_owner_sports_sport] FOREIGN KEY ([sport_id]) REFERENCES [dbo].[sports]([sport_id])
+      );
     END
   `);
 
-  // 4. Nếu chưa có facility nào, tạo mẫu 2 cơ sở cho owner hiện tại và liên kết các court hiện có
-  const checkFac = await pool.request().query('SELECT COUNT(*) AS total FROM facilities');
-  if (checkFac.recordset[0].total === 0) {
-    const ownerRes = await pool.request().query("SELECT TOP 1 user_id FROM users WHERE role = 'OWNER'");
-    const ownerId = ownerRes.recordset[0]?.user_id ?? 0;
-
-    await pool.request().query(`
-      INSERT INTO facilities (owner_id, name, address, phone, description, status)
-      VALUES 
-      (${ownerId}, N'Cơ sở 1 - Cụm Sân Thể Thao Man Thiện PTIT', N'Số 106 Đường Man Thiện, P. Tăng Nhơn Phú A, TP. Thủ Đức, TP.HCM', '0901234567', N'Tổ hợp sân thể thao chất lượng cao phục vụ sinh viên và phong trào khu vực Thủ Đức', 'ACTIVE'),
-      (${ownerId}, N'Cơ sở 2 - Trung Tâm Thể Thao & Pickleball Lê Văn Việt', N'Số 216 Lê Văn Việt, P. Tăng Nhơn Phú A, TP. Thủ Đức, TP.HCM', '0901234568', N'Tổ hợp sân Pickleball ngoài trời có mái che và sân bóng đá mini', 'ACTIVE');
-    `);
-
-    // Gán các sân hiện có vào cơ sở 1 và 2
-    const facs = await pool.request().query('SELECT facility_id FROM facilities ORDER BY facility_id ASC');
-    if (facs.recordset.length >= 2) {
-      const fac1 = facs.recordset[0].facility_id;
-      const fac2 = facs.recordset[1].facility_id;
-      await pool.request().query(`
-        UPDATE courts SET facility_id = ${fac1}, capacity = 14 WHERE court_id IN (0, 1, 3);
-        UPDATE courts SET facility_id = ${fac2}, capacity = 8 WHERE court_id IN (2, 4, 5);
-        UPDATE courts SET facility_id = ${fac1}, capacity = 20 WHERE facility_id IS NULL;
-      `);
-    }
-    console.log('Đã tạo 2 cơ sở mẫu và liên kết các sân con');
-  }
-
-  console.log('✅ Hoàn tất migration Sprint 2!');
+  console.log('✅ Hoàn tất Migration Sprint 2 (DDL) thành công!');
 }
 
 // Nếu chạy trực tiếp script này

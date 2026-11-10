@@ -1,13 +1,12 @@
 import { getPool } from '../../core/config/db.js';
-import { ensureFacilitySchema } from '../facilities/facility.service.js';
 
 /**
  * Lấy danh sách tất cả sân thể thao (Sân con) kèm thông tin Cơ sở sân (facility) và Môn thể thao (sport).
  * Hỗ trợ lọc theo facility_id, sport_id, owner_id để phục vụ trang Đặt sân / Lịch sân của nhóm.
+ * Chỉ trả về các sân đang ACTIVE và thuộc cơ sở đang ACTIVE (hoặc sân độc lập chưa gắn cơ sở).
  * @param {{ facility_id?: number, sport_id?: number, owner_id?: number }} filters
  */
 export async function getAllCourts(filters = {}) {
-  await ensureFacilitySchema(filters.owner_id ? parseInt(filters.owner_id) : undefined);
   const pool = await getPool();
 
   let query = `
@@ -21,6 +20,7 @@ export async function getAllCourts(filters = {}) {
     LEFT JOIN facilities f ON c.facility_id = f.facility_id
     LEFT JOIN sports s ON c.sport_id = s.sport_id
     WHERE c.status = 'ACTIVE'
+      AND (f.status = 'ACTIVE' OR c.facility_id IS NULL)
   `;
 
   const request = pool.request();
@@ -48,7 +48,6 @@ export async function getAllCourts(filters = {}) {
  * @param {number} courtId
  */
 export async function getCourtById(courtId) {
-  await ensureFacilitySchema();
   const pool = await getPool();
   const result = await pool.request()
     .input('id', courtId)
@@ -73,7 +72,6 @@ export async function getCourtById(courtId) {
  */
 export async function createCourt(data) {
   const { ownerId, facilityId = null, courtName, address = '', sportId = 1, capacity = 10, description = '', utilities = '' } = data;
-  await ensureFacilitySchema(ownerId);
   const pool = await getPool();
   const result = await pool.request()
     .input('ownerId', ownerId)
@@ -98,7 +96,6 @@ export async function createCourt(data) {
  * @param {{ courtName?, address?, description?, utilities?, facilityId?, sportId?, capacity? }} data
  */
 export async function updateCourt(courtId, data) {
-  await ensureFacilitySchema();
   const { courtName, address, description, utilities, facilityId, sportId, capacity } = data;
   const pool = await getPool();
   const result = await pool.request()

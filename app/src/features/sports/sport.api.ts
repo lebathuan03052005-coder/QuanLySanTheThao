@@ -31,6 +31,7 @@ export interface SportItem {
   sport_name: string;
   description?: string | null;
   status: SportStatus;
+  owner_id?: number | null;
   court_count?: number;
   active_court_count?: number;
   inactive_court_count?: number;
@@ -57,13 +58,24 @@ export interface ApiResponse<T> {
 }
 
 /**
- * Lấy danh sách toàn bộ loại môn thể thao kèm chi tiết các sân con thuộc từng môn.
+ * Lấy danh mục loại môn thể thao công khai (không chứa danh sách sân nội bộ của các chủ sân).
  */
 export async function getAllSportsApi(params?: {
   search?: string;
   status?: string;
 }): Promise<SportItem[]> {
   const res = await api.get<ApiResponse<SportItem[]>>('/sports', { params });
+  return res.data.data;
+}
+
+/**
+ * Lấy danh mục loại môn thể thao kèm chi tiết các sân con thuộc quyền quản lý của Chủ sân đang đăng nhập.
+ */
+export async function getOwnerSportsApi(params?: {
+  search?: string;
+  status?: string;
+}): Promise<SportItem[]> {
+  const res = await api.get<ApiResponse<SportItem[]>>('/sports/owner', { params });
   return res.data.data;
 }
 

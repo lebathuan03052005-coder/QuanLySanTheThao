@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  getAllSportsApi,
+  getOwnerSportsApi,
   createSportApi,
   updateSportApi,
   updateSportStatusApi,
   type SportItem,
   type SportStatus,
-  type SportCourtDetail,
 } from './sport.api';
 import { useNavigate } from 'react-router';
 import { useAuthStore } from '../../shared/stores/authStore';
@@ -176,7 +175,7 @@ export default function SportManagementPage() {
 
   useEffect(() => {
     loadSports();
-  }, []);
+  }, [user?.id, user?.email]);
 
   // Reset về trang 1 khi thay đổi bộ lọc
   useEffect(() => {
@@ -188,7 +187,7 @@ export default function SportManagementPage() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const data = await getAllSportsApi();
+      const data = await getOwnerSportsApi();
       setSports(data);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể tải danh mục môn thể thao.';
@@ -203,24 +202,13 @@ export default function SportManagementPage() {
     setTimeout(() => setToastMsg(null), 3500);
   }
 
-  // Kiểm tra một sân con có thuộc quyền quản lý của Owner đang đăng nhập hay không
-  function isMyCourt(court: SportCourtDetail): boolean {
-    if (!user) return false;
-    if (user.email && court.owner_email && user.email.toLowerCase() === court.owner_email.toLowerCase()) {
-      return true;
-    }
-    return Number(court.owner_id) === Number(user.id);
-  }
-
-  // Xử lý danh sách môn kèm các sân con thuộc quyền quản lý của Chủ sân hiện tại
+  // Xử lý danh sách môn kèm các sân con thuộc quyền quản lý của Chủ sân hiện tại (đã lọc theo owner_id từ Backend)
   const processedSports = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
 
     return sports
       .map((sport) => {
-        const rawCourts = sport.courts || [];
-        // Chỉ hiển thị các sân con thuộc quyền sở hữu của tài khoản Chủ sân đang đăng nhập
-        const myCourts = rawCourts.filter((c) => isMyCourt(c));
+        const myCourts = sport.courts || [];
 
         const filteredCourts = myCourts.filter((c) => {
           const matchCourtStatus =
@@ -257,7 +245,7 @@ export default function SportManagementPage() {
 
         return true;
       });
-  }, [sports, searchTerm, statusFilter, courtStatusFilter, user]);
+  }, [sports, searchTerm, statusFilter, courtStatusFilter]);
 
   // Tính toán phân trang danh sách môn
   const totalPages = Math.max(1, Math.ceil(processedSports.length / sportsPerPage));
@@ -271,12 +259,12 @@ export default function SportManagementPage() {
     const total = sports.length;
     const active = sports.filter((s) => s.status === 'ACTIVE').length;
     const inactive = sports.filter((s) => s.status === 'INACTIVE').length;
-    const myCourts = sports.flatMap((s) => s.courts || []).filter((c) => isMyCourt(c));
+    const myCourts = sports.flatMap((s) => s.courts || []);
     const totalCourts = myCourts.length;
     const activeCourts = myCourts.filter((c) => (c.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
     const totalFacilities = new Set(myCourts.map((c) => c.facility_id).filter(Boolean)).size;
     return { total, active, inactive, totalCourts, activeCourts, totalFacilities };
-  }, [sports, user]);
+  }, [sports]);
 
   function getSportCourtPage(sportId: number): number {
     return courtPageMap[sportId] || 1;
@@ -707,7 +695,6 @@ export default function SportManagementPage() {
                             <tbody className="divide-y divide-slate-100 text-xs">
                               {paginatedCourts.map((court) => {
                                 const statusBadge = getCourtStatusBadge(court.status);
-                                const mine = isMyCourt(court);
                                 const cleanUtils = parseUtilities(court.utilities);
 
                                 return (
@@ -744,17 +731,10 @@ export default function SportManagementPage() {
                                     <td className="py-3 px-4 align-top">
                                       <div className="font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
                                         <span>{court.owner_name}</span>
-                                        {mine && (
-                                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                            Của bạn
-                                          </span>
-                                        )}
-                                      </div>
-                                      {court.owner_email && (
-                                        <span className="text-[11px] text-slate-400 block">
-                                          {court.owner_email}
+                                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                          Của bạn
                                         </span>
-                                      )}
+                                      </div>
                                     </td>
 
                                     {/* Cột 4: Sức chứa & Tiện ích */}
