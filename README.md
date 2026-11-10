@@ -110,26 +110,31 @@ node test-db.js
 
 ### 📌 Chú thích 3 Tài khoản Chủ sân (`OWNER`) dùng để Test Quản lý Cơ sở, Sân con & Môn thể thao
 
-Để dữ liệu trong Database **không bao giờ bị ghi đè lại mỗi khi khởi động lại Backend (`npm run dev`)**, phần nạp dữ liệu mẫu (3 tài khoản Chủ sân, Cơ sở & 18 sân con/owner) đã được **tách thành script chạy độc lập 1 lần duy nhất**:
+Để dữ liệu và cấu trúc bảng trong Database **không bao giờ bị tự ý thay đổi hay ghi đè mỗi khi khởi động lại Backend (`npm run dev`)**, phần đồng bộ Schema (DDL) và nạp dữ liệu mẫu (Seed) đã được **tách hoàn toàn thành 2 script chạy độc lập**:
 
 ```bash
 cd backend
-npm run seed:wbs31
+
+# 1. Đồng bộ cấu trúc bảng & cột mở rộng Sprint 2 (chạy 1 lần khi mới kéo code về)
+npm run db:migrate
+
+# 2. Nạp dữ liệu mẫu 6 môn thể thao, 3 tài khoản Chủ sân & các cơ sở/sân con (IF NOT EXISTS - không ghi đè dữ liệu hiện có)
+npm run db:seed
 ```
 
 > 💡 **Lưu ý kiến trúc:**
-> - Khi chạy `npm run dev`, Backend **chỉ kiểm tra cấu trúc bảng/cột (DDL)** (`CREATE TABLE IF NOT EXISTS` / `ALTER TABLE`), **tuyệt đối không tự chạy `INSERT` / `UPDATE` / `DELETE` ghi đè dữ liệu**.
-> - Các sân gốc (`court_id` `0..9`) được giữ nguyên thuộc quyền sở hữu của `owner@sportlink.vn` để đồng bộ 100% với bảng phân công nhân viên (`dbo.court_staff`).
+> - Khi chạy `npm run dev`, Backend **tuyệt đối không tự chạy `CREATE TABLE` / `ALTER TABLE` (DDL) hay `INSERT` / `UPDATE` / `DELETE` (DML)** ghi đè dữ liệu hiện có.
+> - Mọi thao tác Thêm / Sửa / Khóa Cơ sở, Sân con và Môn thể thao của Chủ sân nào được cô lập hoàn toàn theo `owner_id` của Chủ sân đó (kể cả khi sửa/khóa môn trên `/owner/sports`, chỉ áp dụng cho danh mục của Chủ sân đang đăng nhập mà không ảnh hưởng sang Chủ sân khác).
 
 - **Mật khẩu đăng nhập chung cho cả 3 tài khoản:** `password123`
 - **Trang đăng nhập:** `http://localhost:5173/login`
-- **Nguyên tắc phân quyền (Strict Owner Isolation):** Tài khoản Chủ sân nào đăng nhập thì **chỉ nhìn thấy và thêm/sửa/khóa được đúng Cơ sở & Sân con thuộc sở hữu của tài khoản đó** (không hiển thị cơ sở mặc định rỗng cho mọi tài khoản và không sửa chéo sân của chủ sân khác).
+- **Nguyên tắc phân quyền (Strict Owner Isolation):** Tài khoản Chủ sân nào đăng nhập thì **chỉ nhìn thấy và thêm/sửa/khóa được đúng Cơ sở, Sân con & Cấu hình môn thể thao thuộc sở hữu của tài khoản đó** (không lộ sân hay email của chủ sân khác và không sửa chéo dữ liệu của chủ sân khác).
 
 | STT | Email đăng nhập | Mật khẩu | Họ tên Chủ sân | Cơ sở sân thuộc quyền sở hữu (2 cơ sở / chủ sân) | Số lượng sân con & Phân bổ môn thể thao |
 | :-: | :--- | :--- | :--- | :--- | :--- |
-| **1** | `owner@sportlink.vn` | `password123` | **Trần Chủ Sân**<br>*(Khu vực Man Thiện - Hiệp Phú)* | 1. **Cụm Sân Bóng Đá SportLink Man Thiện** *(9 sân)*<br>2. **CLB Cầu Lông SportLink Arena Hiệp Phú** *(9 sân)* | **Tổng 18 sân con** chia đều cho **6 môn thể thao** *(3 Bóng đá, 3 Cầu lông, 3 Pickleball, 3 Tennis, 3 Bóng rổ, 3 Bóng chuyền)* |
-| **2** | `owner2@sportlink.vn` | `password123` | **Nguyễn Minh Hoàng**<br>*(Chủ sân Khu CNC)* | 1. **Trung Tâm Pickleball & Tennis SportLink SHTP** *(9 sân)*<br>2. **Nhà Thi Đấu Bóng Rổ Đặng Văn Bi Thủ Đức** *(9 sân)* | **Tổng 18 sân con** chia đều cho **6 môn thể thao** *(3 Bóng đá, 3 Cầu lông, 3 Pickleball, 3 Tennis, 3 Bóng rổ, 3 Bóng chuyền)* |
-| **3** | `owner3@sportlink.vn` | `password123` | **Lê Hoàng Phúc**<br>*(Chủ sân Làng Đại Học)* | 1. **Khu Liên Hợp Thể Thao Sinh Viên Quốc Gia** *(9 sân)*<br>2. **Sân Bóng Chuyền & Cầu Lông Linh Trung** *(9 sân)* | **Tổng 18 sân con** chia đều cho **6 môn thể thao** *(3 Bóng đá, 3 Cầu lông, 3 Pickleball, 3 Tennis, 3 Bóng rổ, 3 Bóng chuyền)* |
+| **1** | `owner@sportlink.vn` | `password123` | **Nguyễn Văn Hùng**<br>*(Chủ Sân Man Thiện - Hiệp Phú)* | 1. **Cụm Sân Bóng Đá SportLink Man Thiện**<br>2. **CLB Cầu Lông SportLink Arena Hiệp Phú** | Chia đều đầy đủ **6 môn thể thao** *(Bóng đá, Cầu lông, Pickleball, Tennis, Bóng rổ, Bóng chuyền)* |
+| **2** | `owner2@sportlink.vn` | `password123` | **Nguyễn Minh Hoàng**<br>*(Chủ sân Khu CNC)* | 1. **Trung Tâm Pickleball & Tennis SportLink SHTP**<br>2. **Nhà Thi Đấu Bóng Rổ Đặng Văn Bi Thủ Đức** | Chia đều đầy đủ **6 môn thể thao** *(Bóng đá, Cầu lông, Pickleball, Tennis, Bóng rổ, Bóng chuyền)* |
+| **3** | `owner3@sportlink.vn` | `password123` | **Lê Quốc Bảo**<br>*(Chủ sân Làng Đại Học)* | 1. **Tổ Hợp Thể Thao Làng Đại Học Thủ Đức**<br>2. **Trung Tâm Thể Thao Sinh Viên ĐHQG - Khu B** | Chia đều đầy đủ **6 môn thể thao** *(Bóng đá, Cầu lông, Pickleball, Tennis, Bóng rổ, Bóng chuyền)* |
 
 #### Các đường dẫn kiểm thử nhanh sau khi đăng nhập quyền `OWNER`:
 1. **Quản lý Cơ sở sân & Danh sách Sân con (S2-02):** `http://localhost:5173/owner/courts`
