@@ -100,13 +100,51 @@ Frontend sẽ chạy tại: `http://localhost:5173`
 
 ---
 
-## 4. Kiểm tra kết nối Database & Nạp tài khoản mẫu
+## 4. Kiểm tra kết nối Database & Danh sách Tài khoản Kiểm thử (WBS 3.1)
 
 Sau khi cấu hình `.env` xong, chạy lệnh sau trong thư mục `backend` để xác nhận kết nối thành công:
 
 ```bash
 node test-db.js
 ```
+
+### 📌 Chú thích 3 Tài khoản Chủ sân (`OWNER`) dùng để Test Quản lý Cơ sở, Sân con & Môn thể thao
+
+Để dữ liệu và cấu trúc bảng trong Database **không bao giờ bị tự ý thay đổi hay ghi đè mỗi khi khởi động lại Backend (`npm run dev`)**, phần đồng bộ Schema (DDL) và nạp dữ liệu mẫu (Seed) đã được **tách hoàn toàn thành 2 script chạy độc lập**:
+
+```bash
+cd backend
+
+# 1. Đồng bộ cấu trúc bảng & cột mở rộng Sprint 2 (chạy 1 lần khi mới kéo code về)
+npm run db:migrate
+
+# 2. Nạp dữ liệu mẫu 6 môn thể thao, 3 tài khoản Chủ sân & các cơ sở/sân con (IF NOT EXISTS - không ghi đè dữ liệu hiện có)
+npm run db:seed
+```
+
+> 💡 **Lưu ý kiến trúc:**
+> - Khi chạy `npm run dev`, Backend **tuyệt đối không tự chạy `CREATE TABLE` / `ALTER TABLE` (DDL) hay `INSERT` / `UPDATE` / `DELETE` (DML)** ghi đè dữ liệu hiện có.
+> - Mọi thao tác Thêm / Sửa / Khóa Cơ sở, Sân con và Môn thể thao của Chủ sân nào được cô lập hoàn toàn theo `owner_id` của Chủ sân đó (kể cả khi sửa/khóa môn trên `/owner/sports`, chỉ áp dụng cho danh mục của Chủ sân đang đăng nhập mà không ảnh hưởng sang Chủ sân khác).
+
+- **Mật khẩu đăng nhập chung cho cả 3 tài khoản:** `password123`
+- **Trang đăng nhập:** `http://localhost:5173/login`
+- **Nguyên tắc phân quyền (Strict Owner Isolation):** Tài khoản Chủ sân nào đăng nhập thì **chỉ nhìn thấy và thêm/sửa/khóa được đúng Cơ sở, Sân con & Cấu hình môn thể thao thuộc sở hữu của tài khoản đó** (không lộ sân hay email của chủ sân khác và không sửa chéo dữ liệu của chủ sân khác).
+
+| STT | Email đăng nhập | Mật khẩu | Họ tên Chủ sân | Cơ sở sân thuộc quyền sở hữu (2 cơ sở / chủ sân) | Số lượng sân con & Phân bổ môn thể thao |
+| :-: | :--- | :--- | :--- | :--- | :--- |
+| **1** | `owner@sportlink.vn` | `password123` | **Nguyễn Văn Hùng**<br>*(Chủ Sân Man Thiện - Hiệp Phú)* | 1. **Cụm Sân Bóng Đá SportLink Man Thiện**<br>2. **CLB Cầu Lông SportLink Arena Hiệp Phú** | Chia đều đầy đủ **6 môn thể thao** *(Bóng đá, Cầu lông, Pickleball, Tennis, Bóng rổ, Bóng chuyền)* |
+| **2** | `owner2@sportlink.vn` | `password123` | **Nguyễn Minh Hoàng**<br>*(Chủ sân Khu CNC)* | 1. **Trung Tâm Pickleball & Tennis SportLink SHTP**<br>2. **Nhà Thi Đấu Bóng Rổ Đặng Văn Bi Thủ Đức** | Chia đều đầy đủ **6 môn thể thao** *(Bóng đá, Cầu lông, Pickleball, Tennis, Bóng rổ, Bóng chuyền)* |
+| **3** | `owner3@sportlink.vn` | `password123` | **Lê Quốc Bảo**<br>*(Chủ sân Làng Đại Học)* | 1. **Tổ Hợp Thể Thao Làng Đại Học Thủ Đức**<br>2. **Trung Tâm Thể Thao Sinh Viên ĐHQG - Khu B** | Chia đều đầy đủ **6 môn thể thao** *(Bóng đá, Cầu lông, Pickleball, Tennis, Bóng rổ, Bóng chuyền)* |
+
+#### Các đường dẫn kiểm thử nhanh sau khi đăng nhập quyền `OWNER`:
+1. **Quản lý Cơ sở sân & Danh sách Sân con (S2-02):** `http://localhost:5173/owner/courts`
+   - Hỗ trợ chế độ xem **"Tổng hợp tất cả cơ sở của tôi (18 sân con)"** hoặc bấm chọn từng Cơ sở bên cột trái để lọc riêng **9 sân con** của cơ sở đó.
+   - Tích hợp tìm kiếm, lọc theo môn thể thao, lọc trạng thái và thanh phân trang (`4 / 6 / 8 sân mỗi trang`).
+2. **Quản lý Danh mục Loại môn thể thao (S2-03):** `http://localhost:5173/owner/sports`
+   - Hiển thị 6 môn thể thao (`Bóng đá`, `Cầu lông`, `Pickleball`, `Tennis`, `Bóng rổ`, `Bóng chuyền`) chia trang cân đối (`3 môn / trang`), kèm bảng chi tiết các sân con của Chủ sân đang đăng nhập thuộc từng môn.
+3. **Lịch đặt sân (liên kết trực tiếp với danh sách Sân con):** `http://localhost:5173/owner/schedule`
+
+---
 
 ## 5. Cấu trúc dự án
 

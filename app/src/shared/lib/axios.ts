@@ -25,10 +25,17 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor — Xử lý lỗi 401 tập trung (token hết hạn trên các trang được bảo vệ)
+// Response Interceptor — Xử lý lỗi 401 tập trung & tự động thử lại 1 lần nếu kết nối mạng thoáng chốc gián đoạn
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const config = error.config;
+    if (config && !error.response && !config._retried) {
+      config._retried = true;
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return api(config);
+    }
+
     const isLoginRequest =
       error.config?.url?.includes('/auth/login') ||
       error.config?.url?.includes('/auth/google');

@@ -231,43 +231,72 @@ export async function checkBookingOwnership(req, res, next) {
 }
 
 /**
- * Middleware kiểm tra phạm vi sân được phân công của Nhân viên (Staff Court Scope).
+ * Middleware kiểm tra phạm vi sân được phép thao tác của Chủ sân (owner) và Nhân viên (staff).
+ * - Owner: chỉ thao tác trên sân thuộc sở hữu của mình (owner_id = req.user.id).
+ * - Staff: chỉ thao tác trên sân được phân công trong bảng court_staff.
  */
 export async function checkStaffCourtAccess(req, res, next) {
   const userRole = (req.user?.role || '').toLowerCase();
-  if (userRole === 'admin' || userRole === 'owner') {
+  if (userRole === 'admin') {
     return next();
   }
 
-  if (userRole !== 'staff') {
-    return res.status(403).json({
-      success: false,
-      message: 'Chỉ nhân viên hoặc chủ sân mới có quyền thực hiện thao tác này.',
-    });
-  }
-
-  const courtId = parseInt(req.params.courtId || req.body.courtId || req.query.courtId);
+  const courtId = parseInt(req.params.courtId || req.body?.courtId || req.query?.courtId);
   if (!courtId) {
     return next();
   }
 
   try {
     const pool = await getPool();
-    const result = await pool
-      .request()
-      .input('staffId', req.user.id)
-      .input('courtId', courtId)
-      .query('SELECT assignment_id FROM court_staff WHERE staff_id = @staffId AND court_id = @courtId');
 
-    if (result.recordset.length === 0) {
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn không được phân công quản lý sân này.',
-        code: 'COURT_ACCESS_DENIED',
-      });
+    if (userRole === 'owner') {
+      const courtCheck = await pool
+        .request()
+        .input('courtId', courtId)
+        .query('SELECT court_id, owner_id FROM courts WHERE court_id = @courtId');
+
+      if (courtCheck.recordset.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy sân thể thao này.',
+        });
+      }
+
+      if (Number(courtCheck.recordset[0].owner_id) !== Number(req.user.id)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Bạn không có quyền thao tác trên sân của chủ sân khác.',
+          code: 'COURT_ACCESS_DENIED',
+        });
+      }
+      return next();
     }
 
-    next();
+    if (userRole === 'staff') {
+      const result = await pool
+        .request()
+        .input('staffId', req.user.id)
+        .input('courtId', courtId)
+        .query('SELECT assignment_id FROM court_staff WHERE staff_id = @staffId AND court_id = @courtId');
+
+      if (result.recordset.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'Bạn không được phân công quản lý sân này.',
+          code: 'COURT_ACCESS_DENIED',
+        });
+      }
+      return next();
+    }
+
+    if (userRole === 'player') {
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      message: 'Bạn không có quyền thực hiện thao tác này.',
+    });
   } catch (err) {
     next(err);
   }
