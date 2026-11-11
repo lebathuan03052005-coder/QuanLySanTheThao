@@ -13,7 +13,8 @@ export default function MatchListPage() {
 
   useEffect(() => {
     fetchMatches()
-      .then(setMatches)
+      .then((data) => setMatches(Array.isArray(data) ? data : []))
+      .catch(() => setMatches([]))
       .finally(() => setLoading(false));
   }, []);
 

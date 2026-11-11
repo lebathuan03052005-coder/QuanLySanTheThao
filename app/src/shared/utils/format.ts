@@ -17,12 +17,15 @@ export function formatCurrency(amount: number): string {
  * @returns Chuỗi, ví dụ: "29/10/2026 17:00"
  */
 export function formatDate(date: string | Date, includeTime = true): string {
+  if (!date) return '';
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return String(date);
   return new Intl.DateTimeFormat('vi-VN', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     ...(includeTime && { hour: '2-digit', minute: '2-digit' }),
-  }).format(new Date(date));
+  }).format(parsed);
 }
 
 /**

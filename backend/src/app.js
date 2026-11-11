@@ -8,6 +8,8 @@ import courtRouter from './modules/courts/court.route.js';
 import staffRouter from './modules/staff/staff.route.js';
 import facilityRouter from './modules/facilities/facility.route.js';
 import sportRouter from './modules/sports/sport.route.js';
+import customerRouter from './modules/customers/customer.route.js';
+import analyticsRouter from './modules/analytics/analytics.route.js';
 import { errorHandler } from './core/middlewares/errorHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,6 +47,8 @@ app.use('/api/matches', matchRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/facilities', facilityRouter);
 app.use('/api/sports', sportRouter);
+app.use('/api/customers', customerRouter);
+app.use('/api/analytics', analyticsRouter);
 
 // Centralized error handler
 app.use(errorHandler);
