@@ -12,6 +12,16 @@ import RevenueDashboardPage from "./features/analytics/RevenueDashboardPage";
 import OccupancyAnalyticsPage from "./features/analytics/OccupancyAnalyticsPage";
 import { useAuthStore } from "./shared/stores/authStore";
 
+function PlayerRouteGuard() {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  const role = (user.role || "").toLowerCase();
+  if (role === "owner") return <Navigate to="/owner/bookings" replace />;
+  if (role === "staff") return <Navigate to="/staff/bookings" replace />;
+  if (role === "admin") return <Navigate to="/admin" replace />;
+  return <PlayerLayout />;
+}
+
 function OwnerRouteGuard() {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
@@ -66,7 +76,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
 
         {/* Route dành cho Player / Người dùng thông thường */}
-        <Route path="/" element={<PlayerLayout />}>
+        <Route path="/" element={<PlayerRouteGuard />}>
           <Route index element={<MatchListPage />} />
           <Route path="matches" element={<MatchListPage />} />
           <Route
@@ -85,7 +95,7 @@ export default function App() {
 
         {/* Route dành cho Owner / Chủ sân (Khớp với các mục trên Sidebar) */}
         <Route path="/owner" element={<OwnerRouteGuard />}>
-          <Route index element={<Navigate to="/owner/analytics" replace />} />
+          <Route index element={<Navigate to="/owner/bookings" replace />} />
           <Route path="analytics" element={<OccupancyAnalyticsPage />} />
           <Route path="bookings" element={<CourtSchedulePage />} />
           <Route path="schedule" element={<CourtSchedulePage />} />

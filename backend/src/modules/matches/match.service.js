@@ -6,8 +6,21 @@ import { getPool } from '../../core/config/db.js';
  */
 export async function getAllMatches(filters = {}) {
   const pool = await getPool();
-  const result = await pool.request()
-    .query('SELECT * FROM Matches WHERE Status = \'open\' ORDER BY MatchDate ASC');
+  const result = await pool.request().query(`
+    SELECT
+      m.match_id AS id,
+      m.host_id AS hostId,
+      m.court_id AS courtId,
+      ISNULL(s.sport_name, N'Thể thao') AS sport,
+      m.match_date AS matchDate,
+      ISNULL(m.max_players, 10) AS slots,
+      LOWER(ISNULL(m.status, 'open')) AS status
+    FROM matches m
+    LEFT JOIN courts c ON m.court_id = c.court_id
+    LEFT JOIN sports s ON c.sport_id = s.sport_id
+    WHERE UPPER(ISNULL(m.status, 'OPEN')) = 'OPEN'
+    ORDER BY m.match_date ASC
+  `);
   return result.recordset;
 }
 
