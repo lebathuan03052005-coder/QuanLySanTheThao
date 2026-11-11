@@ -7,6 +7,7 @@
 - **Lệnh thực thi tự động**:
   - `cd backend && npm run test:tc01`
   - `cd backend && npm run test:tc04`
+  - `cd backend && npm run test:luan`
 
 ---
 
@@ -52,4 +53,26 @@
 | **BUG-S2-03** | Điều kiện `OR NOT EXISTS (SELECT 1 FROM courts WHERE owner_id = @ownerId)` làm lộ dữ liệu sân và doanh thu khi tài khoản Owner mới chưa có sân. | Critical | **Đã khắc phục (Fixed)** ✅ |
 | **BUG-S2-04** | Truy vấn bảng giao dịch (`transactions`) trong Dashboard doanh thu thiếu điều kiện lọc theo khoảng ngày `@startDate` – `@endDate`. | Medium | **Đã khắc phục (Fixed)** ✅ |
 | **BUG-S2-05** | Ngưỡng cảnh báo khung giờ vắng khách trong `getOccupancyAnalytics` đặt `< 25%` thay vì `< 30%` theo đặc tả thẻ. | Low | **Đã khắc phục (Fixed)** ✅ |
+
+---
+
+## 4. Kết quả Kiểm thử Tự động Toàn diện 5 Chức năng Sprint 2 (`npm run test:luan`)
+
+- **File kịch bản**: [`backend/src/scripts/test_luan_sprint2_all.js`](file:///d:/SportLink/QuanLySanTheThao/backend/src/scripts/test_luan_sprint2_all.js)
+
+| Mã TC | Hạng mục WBS | Kịch bản kiểm thử tự động E2E | Trạng thái |
+| :--- | :--- | :--- | :---: |
+| **S2-05.1** | `[3.1] Lịch sân` | Lấy dữ liệu Lịch sân theo Ngày/Tuần/Tháng (13 sân, 2 cơ sở, chuẩn tiếng Việt UTF-8) | **PASS** ✅ |
+| **S2-05.2** | `[3.1] Lịch sân` | Bộ lọc đa tầng theo Cơ sở (`facilityId`), Môn thể thao (`sportId`), Sân con (`courtId`), Trạng thái (`status`) | **PASS** ✅ |
+| **S2-05.3** | `[3.1] Lịch sân` | Tạo đơn đặt sân tại quầy, chặn trùng giờ (`HTTP 409`), luồng `Check-in -> Hoàn thành` & thu đúng số tiền còn thiếu | **PASS** ✅ |
+| **S2-05.4** | `[3.1] Lịch sân` | Khóa bảo trì sân, chặn đặt sân trùng giờ bảo trì (`HTTP 409`) và mở khóa bảo trì | **PASS** ✅ |
+| **S2-06.1** | `[3.1] Khách hàng CRM` | Lấy danh sách khách hàng CRM kèm chỉ số ca đặt hôm nay (`todayActiveBookings`) & chờ thu cọc (`unpaidDepositBookings`) | **PASS** ✅ |
+| **S2-06.2** | `[3.1] Khách hàng CRM` | Tra cứu lịch sử đặt sân chi tiết của khách hàng & đối soát `paidAmount` / `remainingAmount` | **PASS** ✅ |
+| **S2-06.3** | `[3.1] Khách hàng CRM` | Cập nhật điểm uy tín, khóa khách hàng (`LOCKED`) chặn đặt sân mới (`HTTP 403`) & mở khóa lại | **PASS** ✅ |
+| **S2-09.1** | `[3.3] Doanh thu` | Dashboard doanh thu hoạt động chính xác ở cả 4 chu kỳ: Ngày (`day`), Tuần (`week`), Tháng (`month`), Năm (`year`) | **PASS** ✅ |
+| **S2-09.2** | `[3.3] Doanh thu` | Đối soát tổng doanh thu cộng theo từng sân con khớp 100% với tổng doanh thu toàn kỳ | **PASS** ✅ |
+| **S2-10.1** | `[3.3] Tỷ lệ lấp đầy` | Thống kê tỷ lệ lấp đầy sân, ma trận Heatmap `8×7` và phát hiện khung giờ vắng `< 30%` kèm gợi ý khuyến mãi | **PASS** ✅ |
+| **S2-12 (TC01)** | `[6.0] Giá động` | Tách bước nhảy 30 phút qua biên giờ thường/giờ vàng & nhận diện Cuối tuần/Ngày lễ (`02/09`) | **PASS** ✅ |
+| **S2-12 (TC04)** | `[6.0] Phân quyền` | Chặn `STAFF` truy cập trang doanh thu (`HTTP 403`) & cô lập dữ liệu chéo giữa các Chủ sân | **PASS** ✅ |
+
 

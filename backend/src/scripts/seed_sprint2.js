@@ -60,6 +60,195 @@ async function insertCourtIfNotExists(pool, ownerId, item) {
   }
 }
 
+const CP1252_REVERSE = {
+  0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85,
+  0x2020: 0x86, 0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a,
+  0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92,
+  0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+  0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b, 0x0153: 0x9c,
+  0x017e: 0x9e, 0x0178: 0x9f,
+};
+
+function fixMojibake(str) {
+  if (!str || typeof str !== 'string') return str;
+  if (!/(?:Ã.|Ä.|á».|Æ.|º|»|Â)/.test(str)) return str;
+  const bytes = [];
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code <= 0xff) {
+      bytes.push(code);
+    } else if (CP1252_REVERSE[code] !== undefined) {
+      bytes.push(CP1252_REVERSE[code]);
+    } else {
+      return str;
+    }
+  }
+  try {
+    const decoded = Buffer.from(bytes).toString('utf8');
+    if (decoded.includes('\ufffd')) return str;
+    return decoded;
+  } catch {
+    return str;
+  }
+}
+
+async function repairDatabaseMojibake(pool) {
+  // 1. Sửa bảng users
+  const usersRes = await pool.request().query('SELECT [user_id], [full_name], [job_title] FROM [dbo].[users]');
+  for (const row of usersRes.recordset) {
+    const fixedName = fixMojibake(row.full_name);
+    const fixedJob = fixMojibake(row.job_title);
+    if (fixedName !== row.full_name || fixedJob !== row.job_title) {
+      await pool.request()
+        .input('id', row.user_id)
+        .input('name', fixedName)
+        .input('job', fixedJob)
+        .query('UPDATE [dbo].[users] SET [full_name] = @name, [job_title] = @job WHERE [user_id] = @id');
+    }
+  }
+
+  // 2. Sửa bảng customers
+  const custRes = await pool.request().query('SELECT [customer_id], [full_name], [notes] FROM [dbo].[customers]');
+  for (const row of custRes.recordset) {
+    const fixedName = fixMojibake(row.full_name);
+    const fixedNotes = fixMojibake(row.notes);
+    if (fixedName !== row.full_name || fixedNotes !== row.notes) {
+      await pool.request()
+        .input('id', row.customer_id)
+        .input('name', fixedName)
+        .input('notes', fixedNotes)
+        .query('UPDATE [dbo].[customers] SET [full_name] = @name, [notes] = @notes WHERE [customer_id] = @id');
+    }
+  }
+
+  // 3. Sửa bảng sports và gộp các môn bị nhân đôi do lỗi font trước đó
+  const sportsRes = await pool.request().query('SELECT [sport_id], [sport_name], [description], [owner_id] FROM [dbo].[sports] ORDER BY [sport_id] ASC');
+  for (const row of sportsRes.recordset) {
+    const fixedName = fixMojibake(row.sport_name);
+    const fixedDesc = fixMojibake(row.description);
+    if (fixedName !== row.sport_name || fixedDesc !== row.description) {
+      await pool.request()
+        .input('id', row.sport_id)
+        .input('name', fixedName)
+        .input('desc', fixedDesc)
+        .query('UPDATE [dbo].[sports] SET [sport_name] = @name, [description] = @desc WHERE [sport_id] = @id');
+    }
+  }
+
+  // Gộp môn trùng tên (giữ sport_id nhỏ nhất cho mỗi môn chung owner_id IS NULL)
+  const cleanSportsRes = await pool.request().query('SELECT [sport_id], [sport_name] FROM [dbo].[sports] WHERE [owner_id] IS NULL ORDER BY [sport_id] ASC');
+  const canonicalByName = {};
+  for (const row of cleanSportsRes.recordset) {
+    const key = (row.sport_name || '').trim().toLowerCase();
+    if (!canonicalByName[key]) {
+      canonicalByName[key] = row.sport_id;
+    } else {
+      const dupId = row.sport_id;
+      const keepId = canonicalByName[key];
+      await pool.request()
+        .input('dupId', dupId)
+        .input('keepId', keepId)
+        .query(`
+          UPDATE [dbo].[courts] SET [sport_id] = @keepId WHERE [sport_id] = @dupId;
+          DELETE FROM [dbo].[owner_sports] WHERE [sport_id] = @dupId AND EXISTS (
+            SELECT 1 FROM [dbo].[owner_sports] os2 WHERE os2.[owner_id] = [dbo].[owner_sports].[owner_id] AND os2.[sport_id] = @keepId
+          );
+          UPDATE [dbo].[owner_sports] SET [sport_id] = @keepId WHERE [sport_id] = @dupId;
+          IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[matches]') AND name = 'sport_id')
+            UPDATE [dbo].[matches] SET [sport_id] = @keepId WHERE [sport_id] = @dupId;
+          IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[teams]') AND name = 'sport_id')
+            UPDATE [dbo].[teams] SET [sport_id] = @keepId WHERE [sport_id] = @dupId;
+          DELETE FROM [dbo].[sports] WHERE [sport_id] = @dupId;
+        `);
+    }
+  }
+
+  // 4. Sửa bảng courts
+  const courtsRes = await pool.request().query('SELECT [court_id], [court_name], [address], [description], [utilities] FROM [dbo].[courts]');
+  for (const row of courtsRes.recordset) {
+    const fixedName = fixMojibake(row.court_name);
+    const fixedAddr = fixMojibake(row.address);
+    const fixedDesc = fixMojibake(row.description);
+    const fixedUtils = fixMojibake(row.utilities);
+    if (
+      fixedName !== row.court_name ||
+      fixedAddr !== row.address ||
+      fixedDesc !== row.description ||
+      fixedUtils !== row.utilities
+    ) {
+      await pool.request()
+        .input('id', row.court_id)
+        .input('name', fixedName)
+        .input('addr', fixedAddr)
+        .input('desc', fixedDesc)
+        .input('utils', fixedUtils)
+        .query(`
+          UPDATE [dbo].[courts]
+          SET [court_name] = @name, [address] = @addr, [description] = @desc, [utilities] = @utils
+          WHERE [court_id] = @id
+        `);
+    }
+  }
+
+  // 5. Sửa bảng facilities & court_maintenances
+  const facRes = await pool.request().query('SELECT [facility_id], [name], [address], [description] FROM [dbo].[facilities]');
+  for (const row of facRes.recordset) {
+    const fixedName = fixMojibake(row.name);
+    const fixedAddr = fixMojibake(row.address);
+    const fixedDesc = fixMojibake(row.description);
+    if (fixedName !== row.name || fixedAddr !== row.address || fixedDesc !== row.description) {
+      await pool.request()
+        .input('id', row.facility_id)
+        .input('name', fixedName)
+        .input('addr', fixedAddr)
+        .input('desc', fixedDesc)
+        .query('UPDATE [dbo].[facilities] SET [name] = @name, [address] = @addr, [description] = @desc WHERE [facility_id] = @id');
+    }
+  }
+
+  const maintRes = await pool.request().query('SELECT [maintenance_id], [reason] FROM [dbo].[court_maintenances]');
+  for (const row of maintRes.recordset) {
+    const fixedReason = fixMojibake(row.reason);
+    if (fixedReason !== row.reason) {
+      await pool.request()
+        .input('id', row.maintenance_id)
+        .input('reason', fixedReason)
+        .query('UPDATE [dbo].[court_maintenances] SET [reason] = @reason WHERE [maintenance_id] = @id');
+    }
+  }
+
+  // 6. Sửa bảng teams & matches nếu có
+  try {
+    const teamsRes = await pool.request().query('SELECT [team_id], [team_name], [level] FROM [dbo].[teams]');
+    for (const row of teamsRes.recordset) {
+      const fixedName = fixMojibake(row.team_name);
+      const fixedLevel = fixMojibake(row.level);
+      if (fixedName !== row.team_name || fixedLevel !== row.level) {
+        await pool.request()
+          .input('id', row.team_id)
+          .input('name', fixedName)
+          .input('level', fixedLevel)
+          .query('UPDATE [dbo].[teams] SET [team_name] = @name, [level] = @level WHERE [team_id] = @id');
+      }
+    }
+
+    const matchesRes = await pool.request().query('SELECT [Id], [Sport], [level] FROM [dbo].[matches]');
+    for (const row of matchesRes.recordset) {
+      const fixedSport = fixMojibake(row.Sport);
+      const fixedLevel = fixMojibake(row.level);
+      if (fixedSport !== row.Sport || fixedLevel !== row.level) {
+        await pool.request()
+          .input('id', row.Id)
+          .input('sport', fixedSport)
+          .input('level', fixedLevel)
+          .query('UPDATE [dbo].[matches] SET [Sport] = @sport, [level] = @level WHERE [Id] = @id');
+      }
+    }
+  } catch {
+    // Bỏ qua nếu cấu trúc bảng teams/matches khác
+  }
+}
+
 export async function runSprint2Seed() {
   console.log('====================================================');
   console.log('SEED DỮ LIỆU MẪU SPRINT 2 (WBS 3.1 - CHẠY ĐỘC LẬP)');
@@ -67,6 +256,9 @@ export async function runSprint2Seed() {
 
   await runSprint2Migration();
   const pool = await getPool();
+
+  // 0. Tự động sửa lỗi font chữ (UTF-8 / CP1252 Mojibake) trong Database nếu có
+  await repairDatabaseMojibake(pool);
 
   // 1. Khởi tạo 6 môn thể thao mặc định nếu chưa tồn tại (IF NOT EXISTS)
   const defaultSports = [
@@ -95,22 +287,70 @@ export async function runSprint2Seed() {
   await pool.request()
     .input('pwd', DEFAULT_PASSWORD_HASH)
     .query(`
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'admin@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Quản Trị Viên Hệ Thống (Admin)', '0900000001', 'admin@sportlink.vn', @pwd, 'ADMIN', 5.0, 'ACTIVE', GETDATE());
+      END
+
       IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'owner@sportlink.vn')
       BEGIN
-        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [created_at])
-        VALUES (N'Trần Chủ Sân (Cụm Man Thiện & Arena)', '0901000002', 'owner@sportlink.vn', @pwd, 'OWNER', 5.0, GETDATE());
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Trần Chủ Sân (Cụm Man Thiện & Arena)', '0901000002', 'owner@sportlink.vn', @pwd, 'OWNER', 5.0, 'ACTIVE', GETDATE());
       END
 
       IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'owner2@sportlink.vn')
       BEGIN
-        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [created_at])
-        VALUES (N'Nguyễn Minh Hoàng (Chủ sân Khu CNC)', '0902000002', 'owner2@sportlink.vn', @pwd, 'OWNER', 5.0, GETDATE());
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Nguyễn Minh Hoàng (Chủ sân Khu CNC)', '0902000002', 'owner2@sportlink.vn', @pwd, 'OWNER', 5.0, 'ACTIVE', GETDATE());
       END
 
       IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'owner3@sportlink.vn')
       BEGIN
-        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [created_at])
-        VALUES (N'Lê Hoàng Phúc (Chủ sân Làng Đại Học)', '0903000003', 'owner3@sportlink.vn', @pwd, 'OWNER', 5.0, GETDATE());
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Lê Hoàng Phúc (Chủ sân Làng Đại Học)', '0903000003', 'owner3@sportlink.vn', @pwd, 'OWNER', 5.0, 'ACTIVE', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'luan.owner@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Đặng Quang Luân (Chủ sân SportLink)', '0908888999', 'luan.owner@sportlink.vn', @pwd, 'OWNER', 5.0, 'ACTIVE', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'staff@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [job_title], [created_at])
+        VALUES (N'Lê Văn Trực Sân (Nhân viên Ca Sáng/Tối)', '0904000001', 'staff@sportlink.vn', @pwd, 'STAFF', 5.0, 'ACTIVE', N'Nhân viên trực sân & thu ngân', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'staff2@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [job_title], [created_at])
+        VALUES (N'Phạm Thị Thu Ngân (Nhân viên Cơ sở 2)', '0904000002', 'staff2@sportlink.vn', @pwd, 'STAFF', 5.0, 'ACTIVE', N'Nhân viên lễ tân & check-in', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'staff3@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [job_title], [created_at])
+        VALUES (N'Hoàng Gia Bảo (Nhân viên Khu CNC)', '0904000003', 'staff3@sportlink.vn', @pwd, 'STAFF', 5.0, 'ACTIVE', N'Nhân viên vận hành sân', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'player@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Nguyễn Văn Cầu Thủ (Player 1)', '0905000001', 'player@sportlink.vn', @pwd, 'PLAYER', 5.0, 'ACTIVE', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'player2@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Trần Quốc Tuấn (Player 2)', '0905000002', 'player2@sportlink.vn', @pwd, 'PLAYER', 4.9, 'ACTIVE', GETDATE());
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'player3@sportlink.vn')
+      BEGIN
+        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
+        VALUES (N'Lê Minh Khôi (Player 3)', '0905000003', 'player3@sportlink.vn', @pwd, 'PLAYER', 4.7, 'ACTIVE', GETDATE());
       END
     `);
 
@@ -440,6 +680,60 @@ export async function runSprint2Seed() {
         }
       }
     }
+
+    // 6.4 Phân công sân cho nhân viên trực sân (staff@sportlink.vn & staff2@sportlink.vn -> Owner 1, staff3@sportlink.vn -> Owner 2)
+    await pool.request()
+      .input('owner1Id', owner1Id)
+      .query(`
+        UPDATE [dbo].[users]
+        SET [owner_id] = @owner1Id
+        WHERE [email] IN ('staff@sportlink.vn', 'staff2@sportlink.vn') AND [owner_id] IS NULL;
+
+        INSERT INTO [dbo].[court_staff] ([staff_id], [court_id], [assigned_by], [assigned_at])
+        SELECT u.[user_id], c.[court_id], @owner1Id, GETDATE()
+        FROM [dbo].[users] u
+        CROSS JOIN [dbo].[courts] c
+        WHERE u.[email] = 'staff@sportlink.vn'
+          AND c.[owner_id] = @owner1Id
+          AND NOT EXISTS (
+            SELECT 1 FROM [dbo].[court_staff] cs
+            WHERE cs.[staff_id] = u.[user_id] AND cs.[court_id] = c.[court_id]
+          );
+
+        INSERT INTO [dbo].[court_staff] ([staff_id], [court_id], [assigned_by], [assigned_at])
+        SELECT u.[user_id], c.[court_id], @owner1Id, GETDATE()
+        FROM [dbo].[users] u
+        CROSS JOIN (
+          SELECT TOP 6 [court_id] FROM [dbo].[courts] WHERE [owner_id] = @owner1Id ORDER BY [court_id] DESC
+        ) c
+        WHERE u.[email] = 'staff2@sportlink.vn'
+          AND NOT EXISTS (
+            SELECT 1 FROM [dbo].[court_staff] cs
+            WHERE cs.[staff_id] = u.[user_id] AND cs.[court_id] = c.[court_id]
+          );
+      `);
+  }
+
+  if (owner2Id !== undefined) {
+    await pool.request()
+      .input('owner2Id', owner2Id)
+      .query(`
+        UPDATE [dbo].[users]
+        SET [owner_id] = @owner2Id
+        WHERE [email] = 'staff3@sportlink.vn' AND [owner_id] IS NULL;
+
+        INSERT INTO [dbo].[court_staff] ([staff_id], [court_id], [assigned_by], [assigned_at])
+        SELECT u.[user_id], c.[court_id], @owner2Id, GETDATE()
+        FROM [dbo].[users] u
+        CROSS JOIN (
+          SELECT TOP 6 [court_id] FROM [dbo].[courts] WHERE [owner_id] = @owner2Id ORDER BY [court_id] ASC
+        ) c
+        WHERE u.[email] = 'staff3@sportlink.vn'
+          AND NOT EXISTS (
+            SELECT 1 FROM [dbo].[court_staff] cs
+            WHERE cs.[staff_id] = u.[user_id] AND cs.[court_id] = c.[court_id]
+          );
+      `);
   }
 
   console.log('✅ Đã seed xong dữ liệu mẫu Sprint 2 (IF NOT EXISTS - Không ghi đè dữ liệu hiện có)!');

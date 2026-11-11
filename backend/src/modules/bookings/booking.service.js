@@ -370,7 +370,7 @@ export async function getScheduleData(user, query = {}) {
     .input('endDate', endDate);
 
   let bookingSql = `
-    SELECT b.booking_id, b.court_id, b.user_id, b.customer_id, b.match_id,
+    SELECT b.booking_id, b.court_id, b.user_id, b.customer_id,
            b.booking_date, b.start_time, b.end_time,
            b.total_price, b.deposit_amount, b.status, b.created_at,
            c.court_name, c.facility_id, f.name AS facility_name, c.sport_id, s.sport_name,
@@ -441,7 +441,7 @@ export async function getScheduleData(user, query = {}) {
       sportName: b.sport_name || 'Thể thao',
       userId: b.user_id,
       customerId: b.customer_id,
-      matchId: b.match_id,
+      matchId: b.match_id ?? null,
       playerName: b.player_name || 'Khách vãng lai',
       playerPhone: b.player_phone || '',
       playerEmail: b.player_email || '',

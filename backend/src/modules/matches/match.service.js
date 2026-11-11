@@ -8,18 +8,18 @@ export async function getAllMatches(filters = {}) {
   const pool = await getPool();
   const result = await pool.request().query(`
     SELECT
-      m.match_id AS id,
-      m.host_id AS hostId,
-      m.court_id AS courtId,
-      ISNULL(s.sport_name, N'Thể thao') AS sport,
-      m.match_date AS matchDate,
-      ISNULL(m.max_players, 10) AS slots,
+      m.Id AS id,
+      COALESCE(m.HostId, m.creator_id) AS hostId,
+      COALESCE(m.CourtId, m.court_id) AS courtId,
+      COALESCE(m.Sport, s.sport_name, N'Thể thao') AS sport,
+      COALESCE(m.MatchDate, m.start_time, m.created_at) AS matchDate,
+      COALESCE(m.Slots, m.max_players - ISNULL(m.current_players, 0), 10) AS slots,
       LOWER(ISNULL(m.status, 'open')) AS status
     FROM matches m
-    LEFT JOIN courts c ON m.court_id = c.court_id
-    LEFT JOIN sports s ON c.sport_id = s.sport_id
+    LEFT JOIN courts c ON COALESCE(m.CourtId, m.court_id) = c.court_id
+    LEFT JOIN sports s ON COALESCE(m.sport_id, c.sport_id) = s.sport_id
     WHERE UPPER(ISNULL(m.status, 'OPEN')) = 'OPEN'
-    ORDER BY m.match_date ASC
+    ORDER BY COALESCE(m.MatchDate, m.start_time, m.created_at) ASC
   `);
   return result.recordset;
 }

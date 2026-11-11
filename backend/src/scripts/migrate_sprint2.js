@@ -202,6 +202,11 @@ export async function runSprint2Migration() {
 
     IF EXISTS (SELECT * FROM sys.tables WHERE name = 'bookings')
     BEGIN
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[bookings]') AND name = 'match_id')
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [match_id] INT NULL;
+      END
+
       IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[bookings]') AND name = 'customer_id')
       BEGIN
         ALTER TABLE [dbo].[bookings] ADD [customer_id] INT NULL;
