@@ -511,7 +511,7 @@ export async function createBooking(data, actorUser = null) {
     isHoliday = false,
   } = data;
 
-  if (!courtId || !startTime || !endTime) {
+  if (courtId === undefined || courtId === null || courtId === '' || !startTime || !endTime) {
     throw new AppError('Vui lòng chọn sân, giờ bắt đầu và giờ kết thúc.', 400);
   }
 
@@ -1012,7 +1012,7 @@ export async function updateBooking(bookingId, data, actorUser = null) {
  */
 export async function createMaintenance(user, data) {
   const { courtId, date, startTime, endTime, reason } = data;
-  if (!courtId || !date || !startTime || !endTime) {
+  if (courtId === undefined || courtId === null || courtId === '' || !date || !startTime || !endTime) {
     throw new AppError('Vui lòng nhập đầy đủ sân, ngày và khung giờ bảo trì.', 400);
   }
 

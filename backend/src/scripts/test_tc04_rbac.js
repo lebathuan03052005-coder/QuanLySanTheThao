@@ -95,7 +95,7 @@ async function runTc04() {
     .query('SELECT TOP 1 court_id FROM courts WHERE owner_id = @owner1Id ORDER BY court_id ASC');
   const owner1CourtId = owner1CourtRes.recordset[0]?.court_id;
 
-  if (owner1CourtId) {
+  if (owner1CourtId !== undefined && owner1CourtId !== null) {
     const crossOwnerCheck = await runMiddleware(checkStaffCourtAccess, {
       user: { id: owner2Id, role: 'owner' },
       params: {},
@@ -141,7 +141,7 @@ async function runTc04() {
     .query('SELECT TOP 1 customer_id FROM customers ORDER BY customer_id ASC');
   const sampleCustId = anyCustomerRes.recordset[0]?.customer_id;
 
-  if (sampleCustId) {
+  if (sampleCustId !== undefined && sampleCustId !== null) {
     let idorHistoryBlocked = false;
     try {
       await customerService.getCustomerHistory({ id: emptyOwnerId, role: 'owner' }, sampleCustId);
