@@ -156,7 +156,7 @@ export async function getOwnerSports(ownerId, filters = {}) {
 export async function getSportById(sportId, ownerId = null) {
   if (ownerId !== null && ownerId !== undefined) {
     const ownerSports = await getOwnerSports(ownerId);
-    const found = ownerSports.find((s) => s.sport_id === sportId);
+    const found = ownerSports.find((s) => Number(s.sport_id) === Number(sportId));
     if (!found) {
       throw new AppError('Không tìm thấy môn thể thao này.', 404);
     }
@@ -181,6 +181,7 @@ export async function getSportById(sportId, ownerId = null) {
 /**
  * Thêm mới một loại môn thể thao.
  * - Khi Owner tạo môn mới, gắn `owner_id = user.id` để chỉ Owner đó (và Admin) quản lý, không làm nhiễu danh mục của Owner khác.
+ * - Khi Admin tạo môn mới, gắn `owner_id = NULL` để làm môn dùng chung toàn hệ thống.
  * @param {{ sportName: string, description?: string }} data
  * @param {{ id?: number, role?: string }} [user]
  */
@@ -192,7 +193,8 @@ export async function createSport(data, user = null) {
   }
 
   const cleanName = sportName.trim();
-  const ownerId = user?.id !== undefined && user?.id !== null ? Number(user.id) : null;
+  const isAdmin = (user?.role || '').toLowerCase() === 'admin';
+  const ownerId = isAdmin ? null : (user?.id !== undefined && user?.id !== null ? Number(user.id) : null);
   const pool = await getPool();
 
   // Kiểm tra trùng tên trong phạm vi môn chung hoặc môn của chính Owner đó
@@ -286,6 +288,7 @@ export async function updateSport(sportId, data, user = null) {
       .input('sportId', sportId)
       .input('customName', sportName ? sportName.trim() : null)
       .input('customDesc', description !== undefined ? description.trim() : null)
+      .input('defaultStatus', rawSport.status || 'ACTIVE')
       .query(`
         IF EXISTS (SELECT 1 FROM owner_sports WHERE owner_id = @ownerId AND sport_id = @sportId)
         BEGIN
@@ -298,7 +301,7 @@ export async function updateSport(sportId, data, user = null) {
         ELSE
         BEGIN
           INSERT INTO owner_sports (owner_id, sport_id, custom_name, custom_description, status, updated_at)
-          VALUES (@ownerId, @sportId, @customName, @customDesc, 'ACTIVE', GETDATE());
+          VALUES (@ownerId, @sportId, @customName, @customDesc, @defaultStatus, GETDATE());
         END
       `);
 

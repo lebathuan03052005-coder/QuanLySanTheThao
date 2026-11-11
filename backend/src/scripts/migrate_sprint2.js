@@ -73,6 +73,15 @@ export async function runSprint2Migration() {
       ALTER TABLE [dbo].[courts] ADD [facility_id] INT NULL;
     END
 
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.foreign_keys
+      WHERE name = 'fk_courts_facility' AND parent_object_id = OBJECT_ID(N'[dbo].[courts]')
+    )
+    BEGIN
+      ALTER TABLE [dbo].[courts] WITH CHECK ADD CONSTRAINT [fk_courts_facility]
+        FOREIGN KEY ([facility_id]) REFERENCES [dbo].[facilities]([facility_id]);
+    END
+
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'capacity')
     BEGIN
       ALTER TABLE [dbo].[courts] ADD [capacity] INT NULL;
@@ -131,6 +140,15 @@ export async function runSprint2Migration() {
       ALTER TABLE [dbo].[sports] ADD [owner_id] INT NULL;
     END
 
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.foreign_keys
+      WHERE name = 'fk_sports_owner' AND parent_object_id = OBJECT_ID(N'[dbo].[sports]')
+    )
+    BEGIN
+      ALTER TABLE [dbo].[sports] WITH CHECK ADD CONSTRAINT [fk_sports_owner]
+        FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id]);
+    END
+
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[sports]') AND name = 'created_at')
     BEGIN
       ALTER TABLE [dbo].[sports] ADD [created_at] DATETIME DEFAULT GETDATE();
@@ -154,6 +172,28 @@ export async function runSprint2Migration() {
         CONSTRAINT [fk_owner_sports_user] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id]),
         CONSTRAINT [fk_owner_sports_sport] FOREIGN KEY ([sport_id]) REFERENCES [dbo].[sports]([sport_id])
       );
+    END
+    ELSE
+    BEGIN
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[owner_sports]') AND name = 'custom_name')
+      BEGIN
+        ALTER TABLE [dbo].[owner_sports] ADD [custom_name] NVARCHAR(100) NULL;
+      END
+
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[owner_sports]') AND name = 'custom_description')
+      BEGIN
+        ALTER TABLE [dbo].[owner_sports] ADD [custom_description] NVARCHAR(500) NULL;
+      END
+
+      IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[owner_sports]') AND name = 'sport_name')
+      BEGIN
+        EXEC('UPDATE [dbo].[owner_sports] SET [custom_name] = COALESCE([custom_name], [sport_name]) WHERE [sport_name] IS NOT NULL');
+      END
+
+      IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[owner_sports]') AND name = 'description')
+      BEGIN
+        EXEC('UPDATE [dbo].[owner_sports] SET [custom_description] = COALESCE([custom_description], [description]) WHERE [description] IS NOT NULL');
+      END
     END
   `);
 

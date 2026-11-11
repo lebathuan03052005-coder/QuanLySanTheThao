@@ -296,7 +296,7 @@ export async function getCourtsByFacility(facilityId, ownerId, filters = {}) {
     LEFT JOIN facilities f ON c.facility_id = f.facility_id
     LEFT JOIN sports s ON c.sport_id = s.sport_id
     LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
-    WHERE c.facility_id = @facilityId
+    WHERE c.facility_id = @facilityId AND c.owner_id = @ownerId
   `;
 
   if (status && status !== 'ALL') {
@@ -440,7 +440,7 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
     throw new AppError('Bạn không có quyền chỉnh sửa sân bóng này.', 403);
   }
 
-  const { courtName, sportId, capacity, description, utilities, images } = data;
+  const { courtName, sportId, facilityId, capacity, description, utilities, images } = data;
 
   if (courtName !== undefined && !courtName.trim()) {
     throw new AppError('Tên sân không được để trống.', 400);
@@ -451,18 +451,40 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
       .input('sportId', parseInt(sportId))
       .input('ownerId', ownerId)
       .query(`
-        SELECT sport_id FROM sports
-        WHERE sport_id = @sportId AND (owner_id IS NULL OR owner_id = @ownerId)
+        SELECT
+          s.sport_id,
+          COALESCE(os.status, s.status, 'ACTIVE') AS effective_status
+        FROM sports s
+        LEFT JOIN owner_sports os ON os.sport_id = s.sport_id AND os.owner_id = @ownerId
+        WHERE s.sport_id = @sportId AND (s.owner_id IS NULL OR s.owner_id = @ownerId)
       `);
     if (sportRes.recordset.length === 0) {
       throw new AppError('Môn thể thao không tồn tại.', 404);
     }
+    const sp = sportRes.recordset[0];
+    if (
+      Number(sportId) !== Number(court.sport_id) &&
+      sp.effective_status &&
+      sp.effective_status.toUpperCase() === 'INACTIVE'
+    ) {
+      throw new AppError('Không thể chuyển sân sang môn thể thao đã ngừng hoạt động.', 400);
+    }
+  }
+
+  let validFacilityId = null;
+  let targetFacilityAddress = null;
+  if (facilityId !== undefined && facilityId !== null) {
+    const targetFac = await getFacilityById(parseInt(facilityId), ownerId);
+    validFacilityId = targetFac.facility_id;
+    targetFacilityAddress = targetFac.address;
   }
 
   const result = await pool.request()
     .input('courtId', courtId)
     .input('courtName', courtName ? courtName.trim() : null)
     .input('sportId', sportId !== undefined ? parseInt(sportId) : null)
+    .input('facilityId', validFacilityId)
+    .input('address', targetFacilityAddress)
     .input('capacity', capacity !== undefined ? parseInt(capacity) : null)
     .input('description', description !== undefined ? description.trim() : null)
     .input('utilities', utilities !== undefined ? (typeof utilities === 'string' ? utilities : JSON.stringify(utilities)) : null)
@@ -472,6 +494,8 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
       SET 
         court_name = COALESCE(@courtName, court_name),
         sport_id = COALESCE(@sportId, sport_id),
+        facility_id = COALESCE(@facilityId, facility_id),
+        address = COALESCE(@address, address),
         capacity = COALESCE(@capacity, capacity),
         description = COALESCE(@description, description),
         utilities = COALESCE(@utilities, utilities),

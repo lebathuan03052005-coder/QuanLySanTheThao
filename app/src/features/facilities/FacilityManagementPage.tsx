@@ -185,7 +185,7 @@ export default function FacilityManagementPage() {
     try {
       const [facData, sportData] = await Promise.all([
         getOwnerFacilitiesApi(),
-        getOwnerSportsApi({ status: 'ACTIVE' }),
+        getOwnerSportsApi(),
       ]);
       setFacilities(facData);
       setSports(sportData);
@@ -304,6 +304,15 @@ export default function FacilityManagementPage() {
     return filteredCourts.slice(start, start + courtsPerPage);
   }, [filteredCourts, courtPage, courtsPerPage]);
 
+  const activeSports = useMemo(() => sports.filter((s) => s.status === 'ACTIVE'), [sports]);
+  const modalSports = useMemo(
+    () =>
+      sports.filter(
+        (s) => s.status === 'ACTIVE' || (editingCourt && Number(s.sport_id) === Number(editingCourt.sport_id))
+      ),
+    [sports, editingCourt]
+  );
+
   // Thống kê KPI của tài khoản Owner hiện tại
   const stats = useMemo(() => {
     const totalFac = facilities.length;
@@ -374,7 +383,7 @@ export default function FacilityManagementPage() {
     const nextCourtNumber = Number(fac.total_courts || 0) + 1;
     setCourtForm({
       courtName: `Sân ${nextCourtNumber} - `,
-      sportId: sports.length > 0 ? sports[0].sport_id : 0,
+      sportId: activeSports.length > 0 ? activeSports[0].sport_id : (sports[0]?.sport_id ?? 0),
       capacity: 10,
       description: '',
       utilities: 'Đèn LED chiếu sáng, Wifi miễn phí, Bãi giữ xe',
@@ -1409,9 +1418,10 @@ export default function FacilityManagementPage() {
                     aria-label="Chọn loại môn thể thao"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:bg-white text-slate-800"
                   >
-                    {sports.map((s) => (
+                    {modalSports.map((s) => (
                       <option key={s.sport_id} value={s.sport_id}>
                         {s.sport_name}
+                        {s.status !== 'ACTIVE' ? ' (Đang khóa)' : ''}
                       </option>
                     ))}
                   </select>

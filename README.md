@@ -100,11 +100,13 @@ Frontend sẽ chạy tại: `http://localhost:5173`
 
 ---
 
-## 4. Kiểm tra kết nối Database & Danh sách Tài khoản Kiểm thử (WBS 3.1)
+## 4. Khởi tạo Database, Migration & Danh sách Tài khoản Kiểm thử (WBS 3.1)
 
-Sau khi cấu hình `.env` xong, chạy lệnh sau trong thư mục `backend` để xác nhận kết nối thành công:
+1. **Nếu máy mới chưa có database `sportlink_db`**: mở file [`init_sportlink_db.sql`](init_sportlink_db.sql) ở thư mục gốc trong **SQL Server Management Studio (SSMS)** và nhấn **Execute** để tạo database cùng toàn bộ 20 bảng.
+2. Sau khi cấu hình `backend/.env` xong, chạy lệnh sau trong thư mục `backend` để xác nhận kết nối thành công:
 
 ```bash
+cd backend
 node test-db.js
 ```
 
@@ -121,6 +123,8 @@ npm run db:migrate
 # 2. Nạp dữ liệu mẫu 6 môn thể thao, 3 tài khoản Chủ sân & các cơ sở/sân con (IF NOT EXISTS - không ghi đè dữ liệu hiện có)
 npm run db:seed
 ```
+
+- *(Tùy chọn)* Chạy thêm file [`sqlinport.sql`](sqlinport.sql) trong SQL Server nếu muốn nạp thêm tài khoản mẫu cho các vai trò khác (`admin@sportlink.vn`, `staff@sportlink.vn`, `player@sportlink.vn` — mật khẩu `password123`).
 
 > 💡 **Lưu ý kiến trúc:**
 > - Khi chạy `npm run dev`, Backend **tuyệt đối không tự chạy `CREATE TABLE` / `ALTER TABLE` (DDL) hay `INSERT` / `UPDATE` / `DELETE` (DML)** ghi đè dữ liệu hiện có.
