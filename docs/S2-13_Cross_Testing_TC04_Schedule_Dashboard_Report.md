@@ -128,3 +128,4 @@ Trong quá trình thực hiện kiểm thử chéo, người kiểm thử đã p
 2. **Khuyến nghị:**
    - Đã xử lý triệt để lỗ hổng phân quyền falsy ID=0, đảm bảo an toàn tuyệt đối khi demo đồ án.
    - Cho phép chuyển thẻ **S2-13** từ cột **Doing** sang cột **review/test** trên Trello để các thành viên trong nhóm thẩm định và xác nhận.
+

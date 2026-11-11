@@ -45,3 +45,24 @@ export async function deleteCourt(req, res, next) {
     next(err);
   }
 }
+
+export async function getCourtPrices(req, res, next) {
+  try {
+    const courtId = parseInt(req.params.id);
+    const prices = await courtService.getCourtPrices(courtId);
+    res.json({ success: true, data: prices });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateCourtPrices(req, res, next) {
+  try {
+    const courtId = parseInt(req.params.id);
+    const rules = Array.isArray(req.body) ? req.body : req.body.rules;
+    const prices = await courtService.updateCourtPrices(courtId, rules);
+    res.json({ success: true, data: prices, message: 'Cập nhật biểu giá sân thành công.' });
+  } catch (err) {
+    next(err);
+  }
+}

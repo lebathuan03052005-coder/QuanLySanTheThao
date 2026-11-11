@@ -93,3 +93,4 @@ $$\text{Điểm rủi ro (Risk Score)} = P \times I \quad (1 \le \text{Score} \l
    - Thẻ Trello chính: `[1.1] Lập Risk Register` (cột `review/test`).
    - Thẻ Tài liệu dự án gốc: `Risk Register - Danh mục rủi ro và phương án ứng phó` (cột `Tài liệu dự án`).
    - Kho tài liệu Google Docs dùng chung của Nhóm.
+
