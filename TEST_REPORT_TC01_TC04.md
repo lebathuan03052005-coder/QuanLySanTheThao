@@ -7,7 +7,6 @@
 - **Lệnh thực thi tự động**:
   - `cd backend && npm run test:tc01`
   - `cd backend && npm run test:tc04`
-  - `cd backend && npm run test:luan`
 
 ---
 
@@ -56,9 +55,7 @@
 
 ---
 
-## 4. Kết quả Kiểm thử Tự động Toàn diện 5 Chức năng Sprint 2 (`npm run test:luan`)
-
-- **File kịch bản**: [`backend/src/scripts/test_luan_sprint2_all.js`](file:///d:/SportLink/QuanLySanTheThao/backend/src/scripts/test_luan_sprint2_all.js)
+## 4. Kết quả Kiểm thử Tự động Toàn diện 5 Chức năng Sprint 2 (`S2-05`, `S2-06`, `S2-09`, `S2-10`, `S2-12`)
 
 | Mã TC | Hạng mục WBS | Kịch bản kiểm thử tự động E2E | Trạng thái |
 | :--- | :--- | :--- | :---: |
