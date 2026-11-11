@@ -9,7 +9,9 @@
     "start": "node src/app.js",
     "db:migrate": "node --env-file=.env src/scripts/migrate_sprint2.js",
     "db:seed": "node --env-file=.env src/scripts/seed_sprint2.js",
-    "seed:wbs31": "node --env-file=.env src/scripts/seed_sprint2.js"
+    "seed:wbs31": "node --env-file=.env src/scripts/seed_sprint2.js",
+    "test:tc01": "node src/scripts/test_tc01_dynamic_pricing.js",
+    "test:tc04": "node --env-file=.env src/scripts/test_tc04_rbac.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

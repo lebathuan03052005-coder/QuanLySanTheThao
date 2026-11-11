@@ -285,6 +285,163 @@ export async function runSprint2Seed() {
     }
   }
 
+  // 6. Seed bảng giá động (court_prices), khách hàng (customers), đơn đặt sân (bookings) và giao dịch (transactions) mẫu cho Owner 1 (IF NOT EXISTS)
+  if (owner1Id !== undefined) {
+    // 6.1 Seed court_prices mặc định cho các sân chưa có bảng giá
+    const allCourtsRes = await pool.request().query(`
+      SELECT c.[court_id], ISNULL(s.[sport_name], N'') AS [sport_name]
+      FROM [dbo].[courts] c
+      LEFT JOIN [dbo].[sports] s ON c.[sport_id] = s.[sport_id]
+    `);
+
+    for (const court of allCourtsRes.recordset) {
+      const existingPrices = await pool.request()
+        .input('courtId', court.court_id)
+        .query('SELECT COUNT(1) AS cnt FROM [dbo].[court_prices] WHERE [court_id] = @courtId');
+
+      if (Number(existingPrices.recordset[0]?.cnt || 0) === 0) {
+        const isBadmintonOrPickle = court.sport_name.includes('Cầu lông') || court.sport_name.includes('Pickleball');
+        const normalMorning = isBadmintonOrPickle ? 80000 : 200000;
+        const normalAfternoon = isBadmintonOrPickle ? 100000 : 250000;
+        const normalPrime = isBadmintonOrPickle ? 140000 : 380000;
+        const normalLate = isBadmintonOrPickle ? 110000 : 280000;
+        const weekendDay = isBadmintonOrPickle ? 120000 : 300000;
+        const weekendPrime = isBadmintonOrPickle ? 160000 : 450000;
+        const holidayAll = isBadmintonOrPickle ? 180000 : 500000;
+
+        await pool.request()
+          .input('courtId', court.court_id)
+          .input('nm', normalMorning)
+          .input('na', normalAfternoon)
+          .input('np', normalPrime)
+          .input('nl', normalLate)
+          .input('wd', weekendDay)
+          .input('wp', weekendPrime)
+          .input('ha', holidayAll)
+          .query(`
+            INSERT INTO [dbo].[court_prices] ([court_id], [day_type], [start_time], [end_time], [price])
+            VALUES
+              (@courtId, 'NORMAL',  '06:00', '12:00', @nm),
+              (@courtId, 'NORMAL',  '12:00', '17:00', @na),
+              (@courtId, 'NORMAL',  '17:00', '21:00', @np),
+              (@courtId, 'NORMAL',  '21:00', '23:00', @nl),
+              (@courtId, 'WEEKEND', '06:00', '17:00', @wd),
+              (@courtId, 'WEEKEND', '17:00', '23:00', @wp),
+              (@courtId, 'HOLIDAY', '06:00', '23:00', @ha);
+          `);
+      }
+    }
+
+    // 6.2 Seed customers mẫu
+    const sampleCustomers = [
+      { fullName: 'Nguyễn Minh Quân', phone: '0909111222', email: 'minhquan@gmail.com', score: 4.9, status: 'ACTIVE', note: 'Đội trưởng FC Bưu Chính, đặt sân cố định tối Thứ 3 & Thứ 5' },
+      { fullName: 'Trần Hoàng Bảo', phone: '0918222333', email: 'hoangbao@gmail.com', score: 4.8, status: 'ACTIVE', note: 'CLB Cầu lông Hiệp Phú, luôn thanh toán đúng giờ' },
+      { fullName: 'Lê Thị Thu Hà', phone: '0933444555', email: 'thuha.pickle@gmail.com', score: 5.0, status: 'ACTIVE', note: 'Nhóm Pickleball nữ Thủ Đức' },
+      { fullName: 'Phạm Quốc Đạt', phone: '0977666888', email: 'quocdat@gmail.com', score: 3.5, status: 'ACTIVE', note: 'Từng hủy sát giờ 1 lần' },
+      { fullName: 'Võ Văn Hậu', phone: '0988999000', email: 'vanhau@gmail.com', score: 2.0, status: 'LOCKED', note: 'Bùng kèo không đến nhận sân 2 lần liên tiếp (No-show)' },
+    ];
+
+    for (const c of sampleCustomers) {
+      await pool.request()
+        .input('fullName', c.fullName)
+        .input('phone', c.phone)
+        .input('email', c.email)
+        .input('score', c.score)
+        .input('status', c.status)
+        .input('note', c.note)
+        .query(`
+          IF NOT EXISTS (SELECT 1 FROM [dbo].[customers] WHERE [phone] = @phone)
+          BEGIN
+            INSERT INTO [dbo].[customers] ([full_name], [phone], [email], [reputation_score], [status], [notes], [created_at], [updated_at])
+            VALUES (@fullName, @phone, @email, @score, @status, @note, GETDATE(), GETDATE());
+          END
+        `);
+    }
+
+    // 6.3 Seed bookings & transactions mẫu cho Owner 1 nếu Owner 1 có ít hơn 5 booking
+    const o1CourtsList = await pool.request()
+      .input('owner1Id', owner1Id)
+      .query('SELECT [court_id], [court_name] FROM [dbo].[courts] WHERE [owner_id] = @owner1Id ORDER BY [court_id] ASC');
+
+    const o1BookingCountRes = await pool.request()
+      .input('owner1Id', owner1Id)
+      .query(`
+        SELECT COUNT(1) AS cnt
+        FROM [dbo].[bookings] b
+        INNER JOIN [dbo].[courts] c ON b.[court_id] = c.[court_id]
+        WHERE c.[owner_id] = @owner1Id
+      `);
+
+    if (o1CourtsList.recordset.length > 0 && Number(o1BookingCountRes.recordset[0]?.cnt || 0) < 5) {
+      const custMapRes = await pool.request().query('SELECT [customer_id], [full_name], [phone] FROM [dbo].[customers]');
+      const custByPhone = {};
+      for (const row of custMapRes.recordset) {
+        custByPhone[row.phone] = row;
+      }
+
+      const cIds = o1CourtsList.recordset.map((r) => r.court_id);
+      const pickCourt = (idx) => cIds[idx % cIds.length];
+
+      const sampleBookings = [
+        { courtId: pickCourt(0), phone: '0909111222', dayOffset: 0, startTime: '17:00:00', endTime: '19:00:00', price: 760000, deposit: 250000, status: 'CONFIRMED', payType: 'DEPOSIT', payMethod: 'BANK_TRANSFER' },
+        { courtId: pickCourt(1), phone: '0918222333', dayOffset: 0, startTime: '18:00:00', endTime: '20:00:00', price: 280000, deposit: 100000, status: 'CHECKED-IN', payType: 'DEPOSIT', payMethod: 'VNPAY' },
+        { courtId: pickCourt(2), phone: '0933444555', dayOffset: 0, startTime: '08:00:00', endTime: '10:00:00', price: 160000, deposit: 160000, status: 'COMPLETED', payType: 'FULL_PAYMENT', payMethod: 'CASH' },
+        { courtId: pickCourt(3), phone: '0977666888', dayOffset: 0, startTime: '19:00:00', endTime: '21:00:00', price: 760000, deposit: 0, status: 'PENDING', payType: null, payMethod: null },
+        { courtId: pickCourt(0), phone: '0909111222', dayOffset: -1, startTime: '18:00:00', endTime: '20:00:00', price: 760000, deposit: 760000, status: 'COMPLETED', payType: 'FULL_PAYMENT', payMethod: 'BANK_TRANSFER' },
+        { courtId: pickCourt(1), phone: '0918222333', dayOffset: -2, startTime: '17:00:00', endTime: '19:00:00', price: 280000, deposit: 280000, status: 'COMPLETED', payType: 'FULL_PAYMENT', payMethod: 'MOMO' },
+        { courtId: pickCourt(4), phone: '0933444555', dayOffset: -3, startTime: '16:00:00', endTime: '18:00:00', price: 240000, deposit: 240000, status: 'COMPLETED', payType: 'FULL_PAYMENT', payMethod: 'VNPAY' },
+        { courtId: pickCourt(2), phone: '0988999000', dayOffset: -4, startTime: '19:00:00', endTime: '21:00:00', price: 760000, deposit: 0, status: 'NO-SHOW', payType: null, payMethod: null },
+        { courtId: pickCourt(5), phone: '0909111222', dayOffset: 1, startTime: '17:00:00', endTime: '19:00:00', price: 300000, deposit: 100000, status: 'CONFIRMED', payType: 'DEPOSIT', payMethod: 'BANK_TRANSFER' },
+      ];
+
+      for (const b of sampleBookings) {
+        const cust = custByPhone[b.phone];
+        if (!cust) continue;
+
+        const insertRes = await pool.request()
+          .input('courtId', b.courtId)
+          .input('customerId', cust.customer_id)
+          .input('dayOffset', b.dayOffset)
+          .input('startTime', b.startTime)
+          .input('endTime', b.endTime)
+          .input('price', b.price)
+          .input('deposit', b.deposit)
+          .input('status', b.status)
+          .query(`
+            DECLARE @targetDate DATE = CAST(DATEADD(DAY, @dayOffset, GETDATE()) AS DATE);
+
+            IF NOT EXISTS (
+              SELECT 1 FROM [dbo].[bookings]
+              WHERE [court_id] = @courtId AND [booking_date] = @targetDate AND [start_time] = CAST(@startTime AS TIME)
+            )
+            BEGIN
+              INSERT INTO [dbo].[bookings]
+                ([court_id], [customer_id], [booking_date], [start_time], [end_time], [total_price], [deposit_amount], [status], [created_at])
+              OUTPUT INSERTED.[booking_id], INSERTED.[booking_date]
+              VALUES
+                (@courtId, @customerId, @targetDate, CAST(@startTime AS TIME), CAST(@endTime AS TIME), @price, @deposit, @status, DATEADD(DAY, @dayOffset, GETDATE()));
+            END
+          `);
+
+        const insertedBooking = insertRes.recordset?.[0];
+        if (insertedBooking && b.payType && b.deposit > 0) {
+          await pool.request()
+            .input('bookingId', insertedBooking.booking_id)
+            .input('amount', b.payType === 'FULL_PAYMENT' ? b.price : b.deposit)
+            .input('payMethod', b.payMethod)
+            .input('payType', b.payType)
+            .input('dayOffset', b.dayOffset)
+            .query(`
+              INSERT INTO [dbo].[transactions]
+                ([booking_id], [amount], [transaction_type], [payment_method], [status], [created_at])
+              VALUES
+                (@bookingId, @amount, @payType, @payMethod, 'SUCCESS', DATEADD(DAY, @dayOffset, GETDATE()));
+            `);
+        }
+      }
+    }
+  }
+
   console.log('✅ Đã seed xong dữ liệu mẫu Sprint 2 (IF NOT EXISTS - Không ghi đè dữ liệu hiện có)!');
 }
 

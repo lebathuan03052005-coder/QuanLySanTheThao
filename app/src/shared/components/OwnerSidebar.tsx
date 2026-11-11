@@ -122,138 +122,223 @@ export default function OwnerSidebar() {
     }
   }
 
-  // Danh sách các mục menu chính (Khớp 100% với giao diện trong ảnh)
-  const mainNavItems: NavItem[] = [
-    {
-      to: "/owner/bookings",
-      label: "Lịch dặt sân ",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
-          <path
-            strokeWidth={1.8}
-            d="M12 3a9 9 0 0 0 0 18M12 3a9 9 0 0 1 0 18"
-            strokeDasharray="2 2"
-          />
-          <path
-            strokeWidth={1.8}
-            d="M3 12h18M12 3c-2.5 4-2.5 14 0 18M12 3c2.5 4 2.5 14 0 18"
-          />
-        </svg>
-      ),
-    },
-    {
-      to: "/owner/analytics",
-      label: "Thống kê",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
-          <path strokeWidth={1.8} strokeLinecap="round" d="M12 7v5l3 3" />
-        </svg>
-      ),
-    },
-    {
-      to: "/owner/revenue",
-      label: "Doanh thu",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <rect x="3" y="5" width="18" height="14" rx="3" strokeWidth={1.8} />
-          <path strokeWidth={1.8} d="M3 10h18M7 15h2m4 0h4" />
-        </svg>
-      ),
-    },
-    {
-      to: "/owner/courts",
-      label: "Sân",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={1.8} />
-          <path strokeWidth={1.8} d="M3 12h18M12 4v16M8 8h8v8H8z" />
-        </svg>
-      ),
-    },
-    {
-      to: "/owner/staff",
-      label: "Nhân viên",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <circle cx="9" cy="8" r="4" strokeWidth={1.8} />
-          <path
-            strokeWidth={1.8}
-            strokeLinecap="round"
-            d="M2 19c0-3.5 3-6 7-6s7 2.5 7 6"
-          />
-          <circle cx="17" cy="9" r="3" strokeWidth={1.8} />
-          <path
-            strokeWidth={1.8}
-            strokeLinecap="round"
-            d="M19 14c2 .8 3 2.2 3 4"
-          />
-        </svg>
-      ),
-    },
-    {
-      to: "/owner/tournaments",
-      label: "Giải đấu",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeWidth={1.8}
-            d="M8 21h8m-4-4v4M5 4h14v5a7 7 0 0 1-14 0V4z"
-          />
-          <path
-            strokeWidth={1.8}
-            d="M5 6H3a2 2 0 0 0-2 2v1a4 4 0 0 0 4 4h0M19 6h2a2 2 0 0 1 2 2v1a4 4 0 0 1-4 4h0"
-          />
-        </svg>
-      ),
-    },
-    {
-      to: "/owner/coaches",
-      label: "Huấn luyện viên",
-      icon: () => (
-        <svg
-          className="w-5 h-5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
-          <path strokeWidth={1.8} strokeLinecap="round" d="M12 7v5l3 2" />
-        </svg>
-      ),
-    },
-  ];
+  const isStaff = (user?.role || "").toLowerCase() === "staff";
+
+  // Danh sách các mục menu chính (Khớp 100% với phân quyền Owner / Staff)
+  const mainNavItems: NavItem[] = isStaff
+    ? [
+        {
+          to: "/staff/bookings",
+          label: "Lịch đặt sân",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                d="M12 3a9 9 0 0 0 0 18M12 3a9 9 0 0 1 0 18"
+                strokeDasharray="2 2"
+              />
+              <path
+                strokeWidth={1.8}
+                d="M3 12h18M12 3c-2.5 4-2.5 14 0 18M12 3c2.5 4 2.5 14 0 18"
+              />
+            </svg>
+          ),
+        },
+        {
+          to: "/staff/players",
+          label: "Khách hàng",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="8" r="4" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                d="M4 20c0-3.8 3.6-6.5 8-6.5s8 2.7 8 6.5"
+              />
+            </svg>
+          ),
+        },
+      ]
+    : [
+        {
+          to: "/owner/bookings",
+          label: "Lịch đặt sân",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                d="M12 3a9 9 0 0 0 0 18M12 3a9 9 0 0 1 0 18"
+                strokeDasharray="2 2"
+              />
+              <path
+                strokeWidth={1.8}
+                d="M3 12h18M12 3c-2.5 4-2.5 14 0 18M12 3c2.5 4 2.5 14 0 18"
+              />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/analytics",
+          label: "Thống kê",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
+              <path strokeWidth={1.8} strokeLinecap="round" d="M12 7v5l3 3" />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/revenue",
+          label: "Doanh thu",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <rect x="3" y="5" width="18" height="14" rx="3" strokeWidth={1.8} />
+              <path strokeWidth={1.8} d="M3 10h18M7 15h2m4 0h4" />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/courts",
+          label: "Sân",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={1.8} />
+              <path strokeWidth={1.8} d="M3 12h18M12 4v16M8 8h8v8H8z" />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/sports",
+          label: "Môn thể thao",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="8" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                d="M12 4v16M4 12h16"
+              />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/players",
+          label: "Khách hàng",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="8" r="4" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                d="M4 20c0-3.8 3.6-6.5 8-6.5s8 2.7 8 6.5"
+              />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/staff",
+          label: "Nhân viên",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="9" cy="8" r="4" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                d="M2 19c0-3.5 3-6 7-6s7 2.5 7 6"
+              />
+              <circle cx="17" cy="9" r="3" strokeWidth={1.8} />
+              <path
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                d="M19 14c2 .8 3 2.2 3 4"
+              />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/tournaments",
+          label: "Giải đấu",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeWidth={1.8}
+                d="M8 21h8m-4-4v4M5 4h14v5a7 7 0 0 1-14 0V4z"
+              />
+              <path
+                strokeWidth={1.8}
+                d="M5 6H3a2 2 0 0 0-2 2v1a4 4 0 0 0 4 4h0M19 6h2a2 2 0 0 1 2 2v1a4 4 0 0 1-4 4h0"
+              />
+            </svg>
+          ),
+        },
+        {
+          to: "/owner/coaches",
+          label: "Huấn luyện viên",
+          icon: () => (
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
+              <path strokeWidth={1.8} strokeLinecap="round" d="M12 7v5l3 2" />
+            </svg>
+          ),
+        },
+      ];
 
   // Các mục menu phụ phía dưới
   const bottomNavItems: NavItem[] = [
@@ -578,7 +663,7 @@ export default function OwnerSidebar() {
                       {user?.fullName || "Tim Darly"}
                     </div>
                     <div className="text-xs text-slate-400 truncate mt-0.5 flex items-center gap-1.5">
-                      <span>Manager</span>
+                      <span>{isStaff ? "Nhân viên trực sân" : "Manager"}</span>
                       {uploadSuccess && (
                         <span className="text-[10px] text-emerald-400 font-medium">
                           ✓ Đã đổi ảnh
