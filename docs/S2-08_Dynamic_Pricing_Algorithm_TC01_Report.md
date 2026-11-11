@@ -6,8 +6,8 @@
 > **Ngày thực hiện:** 11/11/2026 | **Thời lượng ước tính:** 12 giờ  
 > **Kết quả Unit Test:** 9/9 Test Cases PASSED (100%) | **Lệnh chạy:** `npm run test:tc01`  
 > 
-> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ nhóm):**  
-> `https://docs.google.com/document/d/1SportLink-S2-08-DynamicPricing-TC01-Report/edit?usp=sharing`  
+> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ công khai):**  
+> `https://docs.google.com/document/d/1lL-M_0285dzbkuyaEUd9TMhZ7M6WRvOcjsM5hQghNnQ/edit?usp=sharing`  
 > *(Tài liệu được định dạng tương thích 100% chuẩn Google Docs / Word .docx phục vụ nghiệm thu học phần QLDAPM)*
 
 ---

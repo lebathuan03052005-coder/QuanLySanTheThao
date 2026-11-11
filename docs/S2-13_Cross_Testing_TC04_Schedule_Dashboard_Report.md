@@ -7,8 +7,8 @@
 > **Thời gian thực hiện:** 11/11/2026 | **Thời lượng ước lượng:** 4 giờ  
 > **Trạng thái:** Hoàn tất 100% | **Tiêu chuẩn nghiệm thu:** PASSED (5/5 nhóm kịch bản RBAC, 8/8 ca kiểm thử chức năng giao diện)  
 > 
-> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ nhóm):**  
-> `https://docs.google.com/document/d/1SportLink-S2-13-CrossTest-TC04-Report/edit?usp=sharing`  
+> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ công khai):**  
+> `https://docs.google.com/document/d/1bmzlqPXlFshUzplxTemZ94FQcua1XHKTkTRP5bGt_PY/edit?usp=sharing`  
 > *(Tài liệu được định dạng tương thích 100% chuẩn Google Docs / Word .docx phục vụ nghiệm thu học phần QLDAPM)*
 
 ---

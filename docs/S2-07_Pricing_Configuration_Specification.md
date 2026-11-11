@@ -6,8 +6,8 @@
 > **Ngày lập:** 11/11/2026 | **Thời lượng ước tính:** 16 giờ | **Hạn hoàn thành:** 12/11/2026  
 > **Trạng thái:** Đang thực hiện (`Doing`)  
 > 
-> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ nhóm):**  
-> `https://docs.google.com/document/d/1SportLink-S2-07-Pricing-Config-Specification/edit?usp=sharing`  
+> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ công khai):**  
+> `https://docs.google.com/document/d/1EGMzf12EsMrqaideZ5OBzU7wNxVlp5Ot7wfEUgrtMKs/edit?usp=sharing`  
 > *(Tài liệu được định dạng tương thích 100% chuẩn Google Docs / Word .docx phục vụ nghiệm thu học phần QLDAPM)*
 
 ---

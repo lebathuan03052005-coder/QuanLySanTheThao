@@ -7,8 +7,8 @@
 > **Thời gian cập nhật:** 11/11/2026 (Phiên bản Sprint 2 - Baseline Post Cross-Testing)  
 > **Trạng thái:** Hoàn tất 100% | **Tiêu chuẩn áp dụng:** PMI PMBOK Guide 7th Edition & ISO 31000:2018 Risk Management  
 > 
-> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ nhóm):**  
-> `https://docs.google.com/document/d/1SportLink-S2-14-Risk-Register-Plan/edit?usp=sharing`  
+> 📄 **Liên kết Google Docs (Xem trực tuyến & Chia sẻ công khai):**  
+> `https://docs.google.com/document/d/1JVHdR7rZ4HcoVP0S7zxWBNP2seVXtWkup5JB_er-UAs/edit?usp=sharing`  
 > *(Tài liệu được chuẩn hóa phục vụ báo cáo tiến độ môn học Quản lý Dự án Phần mềm QLDAPM)*
 
 ---
