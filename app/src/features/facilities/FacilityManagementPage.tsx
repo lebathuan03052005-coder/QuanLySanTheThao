@@ -1547,7 +1547,8 @@ export default function FacilityManagementPage() {
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
         onSaved={() => {
-          // Biểu giá đã được lưu vào database
+          showToast(`Đã cập nhật bảng giá động cho "${pricingCourt?.court_name || 'sân'}" thành công.`);
+          loadInitialData();
         }}
       />
     </div>

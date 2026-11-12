@@ -1,6 +1,6 @@
 /**
  * [6.0] Kịch bản Kiểm thử Phân quyền Chéo RBAC & Cô lập Dữ liệu (TC04)
- * Phụ trách: Đặng Quang Luân (S2-12)
+ * Thực hiện & Ghi nhận lỗi: Trần Lê Quang Hữu (S2-13) & Đặng Quang Luân (S2-12)
  * Chạy kiểm thử: npm run test:tc04 (hoặc node --env-file=.env src/scripts/test_tc04_rbac.js)
  */
 import assert from 'node:assert/strict';
