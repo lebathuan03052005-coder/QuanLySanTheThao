@@ -91,19 +91,26 @@ function estimateDynamicPriceClient(
 
   const dt = parseDateIso(bookingDate);
   const dayOfWeek = dt.getDay();
-  const dayType = isHolidayDate(bookingDate)
+  const isHoliday = isHolidayDate(bookingDate);
+  const targetDayType = isHoliday
     ? 'HOLIDAY'
     : dayOfWeek === 0 || dayOfWeek === 6
       ? 'WEEKEND'
-      : 'WEEKDAY';
+      : 'NORMAL';
 
-  let rules = (court.prices || []).filter(
-    (p) => (p.dayType || '').toUpperCase() === dayType
-  );
+  let rules = (court.prices || []).filter((p) => {
+    const pDt = (p.dayType || '').toUpperCase();
+    if (targetDayType === 'NORMAL') {
+      return pDt === 'NORMAL' || pDt === 'WEEKDAY';
+    }
+    return pDt === targetDayType;
+  });
+
   if (rules.length === 0) {
-    rules = (court.prices || []).filter(
-      (p) => (p.dayType || '').toUpperCase() === 'WEEKDAY'
-    );
+    rules = (court.prices || []).filter((p) => {
+      const pDt = (p.dayType || '').toUpperCase();
+      return pDt === 'NORMAL' || pDt === 'WEEKDAY';
+    });
   }
   if (rules.length === 0) {
     return Math.round((endH - startH) * 200000);

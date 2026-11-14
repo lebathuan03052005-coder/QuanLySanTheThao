@@ -1,15 +1,16 @@
 /**
- * [6.0] Kịch bản Kiểm thử Chéo Giá động và Biên Khung giờ (TC01)
- * Phụ trách: Đặng Quang Luân (S2-12)
+ * [3.2 / 6.0] Kịch bản Kiểm thử Hàm Tính Giá Động và Biên Khung Giờ (TC01)
+ * Phát triển & Unit Test: Trần Lê Quang Hữu (S2-08)
+ * Test chéo & Ghi lỗi: Đặng Quang Luân (S2-12)
  * Chạy kiểm thử: npm run test:tc01 (hoặc node src/scripts/test_tc01_dynamic_pricing.js)
  */
 import assert from 'node:assert/strict';
 import { calculateDynamicPrice } from '../modules/bookings/booking.service.js';
 
 const samplePriceRules = [
-  { day_type: 'WEEKDAY', start_time: '06:00', end_time: '16:00', price: 200000 },
-  { day_type: 'WEEKDAY', start_time: '16:00', end_time: '21:00', price: 350000 },
-  { day_type: 'WEEKDAY', start_time: '21:00', end_time: '23:00', price: 250000 },
+  { day_type: 'NORMAL', start_time: '06:00', end_time: '16:00', price: 200000 },
+  { day_type: 'NORMAL', start_time: '16:00', end_time: '21:00', price: 350000 },
+  { day_type: 'NORMAL', start_time: '21:00', end_time: '23:00', price: 250000 },
   { day_type: 'WEEKEND', start_time: '06:00', end_time: '16:00', price: 280000 },
   { day_type: 'WEEKEND', start_time: '16:00', end_time: '23:00', price: 420000 },
   { day_type: 'HOLIDAY', start_time: '06:00', end_time: '23:00', price: 450000 },

@@ -12,6 +12,7 @@ import {
   type CourtItem,
 } from './facility.api';
 import { getOwnerSportsApi, type SportItem } from '../sports/sport.api';
+import CourtPricingModal from './CourtPricingModal';
 import { useAuthStore } from '../../shared/stores/authStore';
 import { useNavigate } from 'react-router';
 
@@ -151,6 +152,10 @@ export default function FacilityManagementPage() {
   });
   const [courtSubmitting, setCourtSubmitting] = useState(false);
   const [courtError, setCourtError] = useState<string | null>(null);
+
+  // Modal Cấu hình biểu phí động sân con (WBS 3.2 - S2-07)
+  const [pricingCourt, setPricingCourt] = useState<CourtItem | null>(null);
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
 
   // Modal Xác nhận đổi trạng thái (Cơ sở hoặc Sân con)
   const [statusConfirmModal, setStatusConfirmModal] = useState<{
@@ -1123,6 +1128,16 @@ export default function FacilityManagementPage() {
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <button
                                   type="button"
+                                  onClick={() => {
+                                    setPricingCourt(court);
+                                    setIsPricingModalOpen(true);
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 border border-teal-200/80 rounded-xl transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <span>💰 Cấu hình giá</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleOpenEditCourt(court)}
                                   className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                                 >
@@ -1526,6 +1541,16 @@ export default function FacilityManagementPage() {
           </div>
         </div>
       )}
+      {/* Modal Cấu hình biểu phí động (WBS 3.2 - S2-07) */}
+      <CourtPricingModal
+        court={pricingCourt}
+        isOpen={isPricingModalOpen}
+        onClose={() => setIsPricingModalOpen(false)}
+        onSaved={() => {
+          showToast(`Đã cập nhật bảng giá động cho "${pricingCourt?.court_name || 'sân'}" thành công.`);
+          loadInitialData();
+        }}
+      />
     </div>
   );
 }
