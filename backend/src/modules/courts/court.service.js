@@ -37,6 +37,10 @@ export async function getAllCourts(filters = {}) {
     request.input('sportId', parseInt(filters.sport_id));
     query += ' AND c.sport_id = @sportId';
   }
+  if (filters.keyword !== undefined && filters.keyword.trim() !== '') {
+    request.input('keyword', `%${filters.keyword.trim()}%`);
+    query += ' AND (c.court_name LIKE @keyword OR c.address LIKE @keyword OR f.name LIKE @keyword OR f.address LIKE @keyword OR s.sport_name LIKE @keyword)';
+  }
 
   query += ' ORDER BY c.facility_id ASC, c.court_id ASC';
   const result = await request.query(query);
@@ -132,4 +136,105 @@ export async function deleteCourt(courtId) {
   await pool.request()
     .input('id', courtId)
     .query('DELETE FROM courts WHERE court_id = @id');
+}
+
+/**
+ * Lấy danh sách quy tắc giá của sân con (WBS 3.2 - S2-07).
+ * @param {number} courtId
+ */
+export async function getCourtPrices(courtId) {
+  const pool = await getPool();
+  const result = await pool.request()
+    .input('courtId', courtId)
+    .query(`
+      SELECT price_id, court_id, day_type, 
+             CONVERT(VARCHAR(5), start_time, 108) AS start_time, 
+             CONVERT(VARCHAR(5), end_time, 108) AS end_time, 
+             price
+      FROM court_prices
+      WHERE court_id = @courtId
+      ORDER BY 
+        CASE day_type 
+          WHEN 'NORMAL' THEN 1 
+          WHEN 'WEEKDAY' THEN 1 
+          WHEN 'WEEKEND' THEN 2 
+          WHEN 'HOLIDAY' THEN 3 
+          ELSE 4 
+        END,
+        start_time ASC
+    `);
+  return result.recordset;
+}
+
+/**
+ * Cập nhật danh sách quy tắc giá của sân con (WBS 3.2 - S2-07).
+ * Ghi đè đồng bộ theo danh sách truyền vào trong Transaction an toàn.
+ * @param {number} courtId
+ * @param {Array<{ day_type: string, start_time: string, end_time: string, price: number }>} rules
+ */
+export async function updateCourtPrices(courtId, rules) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    const err = new Error('Danh sách quy tắc giá không hợp lệ hoặc rỗng.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Validate từng quy tắc
+  for (const r of rules) {
+    const dayType = (r.day_type || r.dayType || '').toUpperCase();
+    if (!['NORMAL', 'WEEKDAY', 'WEEKEND', 'HOLIDAY'].includes(dayType)) {
+      const err = new Error(`Loại ngày '${dayType}' không hợp lệ. Phải là NORMAL, WEEKDAY, WEEKEND hoặc HOLIDAY.`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const startTime = (r.start_time || r.startTime || '').trim();
+    const endTime = (r.end_time || r.endTime || '').trim();
+    if (!startTime || !endTime) {
+      const err = new Error('Giờ bắt đầu và giờ kết thúc không được để trống.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const price = Number(r.price);
+    if (isNaN(price) || price < 0) {
+      const err = new Error('Đơn giá phải là số không âm.');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  const pool = await getPool();
+  const transaction = pool.transaction();
+  await transaction.begin();
+
+  try {
+    const delReq = transaction.request();
+    delReq.input('courtId', courtId);
+    await delReq.query('DELETE FROM court_prices WHERE court_id = @courtId');
+
+    for (const r of rules) {
+      const dayType = (r.day_type || r.dayType || '').toUpperCase();
+      const startTime = (r.start_time || r.startTime || '').trim();
+      const endTime = (r.end_time || r.endTime || '').trim();
+      const price = Number(r.price);
+
+      const insReq = transaction.request();
+      insReq.input('courtId', courtId);
+      insReq.input('dayType', dayType);
+      insReq.input('startTime', startTime.length === 5 ? `${startTime}:00` : startTime);
+      insReq.input('endTime', endTime.length === 5 ? `${endTime}:00` : endTime);
+      insReq.input('price', price);
+
+      await insReq.query(`
+        INSERT INTO court_prices (court_id, day_type, start_time, end_time, price)
+        VALUES (@courtId, @dayType, CAST(@startTime AS TIME), CAST(@endTime AS TIME), @price)
+      `);
+    }
+
+    await transaction.commit();
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+
+  return getCourtPrices(courtId);
 }

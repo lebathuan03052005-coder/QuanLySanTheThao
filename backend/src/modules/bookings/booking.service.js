@@ -94,20 +94,26 @@ export function calculateDynamicPrice(
   const dateObj = new Date(`${bookingDate}T00:00:00`);
   const dayOfWeek = dateObj.getDay(); // 0: CN, 6: Thứ 7
   const holidayFlag = Boolean(isHoliday) || isVietnameseHoliday(bookingDate);
-  const dayType = holidayFlag
+  const targetDayType = holidayFlag
     ? 'HOLIDAY'
     : dayOfWeek === 0 || dayOfWeek === 6
       ? 'WEEKEND'
-      : 'WEEKDAY';
+      : 'NORMAL';
 
-  // Lọc các quy tắc giá theo dayType (nếu không có thì fallback về WEEKDAY)
-  let applicableRules = (priceRules || []).filter(
-    (r) => (r.day_type || r.dayType || '').toUpperCase() === dayType
-  );
+  // Lọc các quy tắc giá theo targetDayType (hỗ trợ cả NORMAL và WEEKDAY)
+  let applicableRules = (priceRules || []).filter((r) => {
+    const rDt = (r.day_type || r.dayType || '').toUpperCase();
+    if (targetDayType === 'NORMAL') {
+      return rDt === 'NORMAL' || rDt === 'WEEKDAY';
+    }
+    return rDt === targetDayType;
+  });
+
   if (applicableRules.length === 0) {
-    applicableRules = (priceRules || []).filter(
-      (r) => (r.day_type || r.dayType || '').toUpperCase() === 'WEEKDAY'
-    );
+    applicableRules = (priceRules || []).filter((r) => {
+      const rDt = (r.day_type || r.dayType || '').toUpperCase();
+      return rDt === 'NORMAL' || rDt === 'WEEKDAY';
+    });
   }
 
   // Nếu sân chưa cấu hình bảng giá, mặc định 200,000đ/giờ
@@ -511,7 +517,7 @@ export async function createBooking(data, actorUser = null) {
     isHoliday = false,
   } = data;
 
-  if (!courtId || !startTime || !endTime) {
+  if (courtId === undefined || courtId === null || courtId === '' || !startTime || !endTime) {
     throw new AppError('Vui lòng chọn sân, giờ bắt đầu và giờ kết thúc.', 400);
   }
 
@@ -1012,7 +1018,7 @@ export async function updateBooking(bookingId, data, actorUser = null) {
  */
 export async function createMaintenance(user, data) {
   const { courtId, date, startTime, endTime, reason } = data;
-  if (!courtId || !date || !startTime || !endTime) {
+  if (courtId === undefined || courtId === null || courtId === '' || !date || !startTime || !endTime) {
     throw new AppError('Vui lòng nhập đầy đủ sân, ngày và khung giờ bảo trì.', 400);
   }
 

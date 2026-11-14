@@ -175,6 +175,15 @@ export async function updateCourtInFacilityApi(
   return res.data.data;
 }
 
+export interface CourtPriceRule {
+  price_id?: number;
+  court_id?: number;
+  day_type: 'NORMAL' | 'WEEKDAY' | 'WEEKEND' | 'HOLIDAY';
+  start_time: string;
+  end_time: string;
+  price: number;
+}
+
 /**
  * Bật / tắt trạng thái hoạt động của sân con.
  */
@@ -185,5 +194,24 @@ export async function updateCourtStatusApi(
   const res = await api.patch<ApiResponse<CourtItem>>(`/facilities/courts/${courtId}/status`, {
     status,
   });
+  return res.data.data;
+}
+
+/**
+ * [WBS 3.2 - S2-07] Lấy danh sách quy tắc giá của sân con.
+ */
+export async function getCourtPricesApi(courtId: number): Promise<CourtPriceRule[]> {
+  const res = await api.get<ApiResponse<CourtPriceRule[]>>(`/courts/${courtId}/prices`);
+  return res.data.data;
+}
+
+/**
+ * [WBS 3.2 - S2-07] Cập nhật bảng giá động của sân con.
+ */
+export async function updateCourtPricesApi(
+  courtId: number,
+  rules: CourtPriceRule[]
+): Promise<CourtPriceRule[]> {
+  const res = await api.put<ApiResponse<CourtPriceRule[]>>(`/courts/${courtId}/prices`, { rules });
   return res.data.data;
 }

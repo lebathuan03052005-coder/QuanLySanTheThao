@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import LoginPage from "./features/auth/LoginPage";
 import PlayerLayout from "./shared/layouts/PlayerLayout";
 import OwnerLayout from "./shared/layouts/OwnerLayout";
+import PlayerHomePage from "./features/home/PlayerHomePage";
+import CourtListPage from "./features/courts/CourtListPage";
 import MatchListPage from "./features/matches/MatchListPage";
 import StaffManagementPage from "./features/staff/StaffManagementPage";
 import FacilityManagementPage from "./features/facilities/FacilityManagementPage";
@@ -13,12 +15,6 @@ import OccupancyAnalyticsPage from "./features/analytics/OccupancyAnalyticsPage"
 import { useAuthStore } from "./shared/stores/authStore";
 
 function PlayerRouteGuard() {
-  const { user, token } = useAuthStore();
-  if (!token || !user) return <Navigate to="/login" replace />;
-  const role = (user.role || "").toLowerCase();
-  if (role === "owner") return <Navigate to="/owner/bookings" replace />;
-  if (role === "staff") return <Navigate to="/staff/bookings" replace />;
-  if (role === "admin") return <Navigate to="/admin" replace />;
   return <PlayerLayout />;
 }
 
@@ -77,20 +73,11 @@ export default function App() {
 
         {/* Route dành cho Player / Người dùng thông thường */}
         <Route path="/" element={<PlayerRouteGuard />}>
-          <Route index element={<MatchListPage />} />
+          <Route index element={<PlayerHomePage />} />
+          <Route path="courts" element={<CourtListPage />} />
+          <Route path="bookings" element={<div className="p-8 text-center text-gray-500">Khu vực lịch đặt sân của tôi</div>} />
           <Route path="matches" element={<MatchListPage />} />
-          <Route
-            path="courts"
-            element={
-              <div className="p-4 text-gray-600">Khu vực danh sách sân</div>
-            }
-          />
-          <Route
-            path="bookings"
-            element={
-              <div className="p-4 text-gray-600">Khu vực lịch đặt sân</div>
-            }
-          />
+          <Route path="news" element={<div className="p-8 text-center text-gray-500">Khu vực tin tức thể thao SportLink</div>} />
         </Route>
 
         {/* Route dành cho Owner / Chủ sân (Khớp với các mục trên Sidebar) */}

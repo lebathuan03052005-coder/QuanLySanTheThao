@@ -12,6 +12,40 @@ export async function runSprint2Migration() {
   const pool = await getPool();
   console.log('--- Bắt đầu Migration Sprint 2 (DDL): Users, Staff, Facilities, Courts & Sports ---');
 
+  // 0. Tạo bảng [users] nếu chưa tồn tại hoặc cập nhật ràng buộc role
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'users')
+    BEGIN
+      CREATE TABLE [dbo].[users] (
+        [user_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        [full_name] NVARCHAR(100) NOT NULL,
+        [phone] VARCHAR(20) NULL,
+        [email] VARCHAR(100) NOT NULL UNIQUE,
+        [password_hash] VARCHAR(255) NOT NULL,
+        [role] VARCHAR(20) NOT NULL DEFAULT 'PLAYER',
+        [reputation_score] DECIMAL(3,1) DEFAULT 5.0,
+        [avatar_url] NVARCHAR(500) NULL,
+        [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+        [owner_id] INT NULL,
+        [job_title] NVARCHAR(100) NULL,
+        [created_at] DATETIME DEFAULT GETDATE()
+      );
+    END
+
+    -- Đồng bộ ràng buộc role cho [users] (hỗ trợ đầy đủ ADMIN, OWNER, STAFF, PLAYER cả hoa lẫn thường)
+    DECLARE @userRoleChk NVARCHAR(256) = (
+      SELECT TOP 1 name FROM sys.check_constraints 
+      WHERE parent_object_id = OBJECT_ID('dbo.users')
+        AND definition LIKE '%role%'
+    );
+    IF @userRoleChk IS NOT NULL
+    BEGIN
+      EXEC('ALTER TABLE [dbo].[users] DROP CONSTRAINT [' + @userRoleChk + ']');
+    END
+    ALTER TABLE [dbo].[users] WITH CHECK ADD CONSTRAINT [chk_users_role] 
+      CHECK ([role] IN ('PLAYER', 'STAFF', 'OWNER', 'ADMIN', 'player', 'staff', 'owner', 'admin'));
+  `);
+
   // 1. Đồng bộ các cột mở rộng của bảng [users] và bảng [court_staff]
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'avatar_url')
@@ -68,6 +102,27 @@ export async function runSprint2Migration() {
 
   // 3. Cập nhật các cột bổ sung cho bảng [courts]
   await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'courts')
+    BEGIN
+      CREATE TABLE [dbo].[courts] (
+        [court_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        [owner_id] INT NOT NULL,
+        [sport_id] INT NOT NULL,
+        [facility_id] INT NULL,
+        [court_name] NVARCHAR(150) NOT NULL,
+        [court_type] NVARCHAR(50) NULL,
+        [price_per_hour] DECIMAL(18,2) DEFAULT 0,
+        [address] NVARCHAR(255) NULL,
+        [description] NVARCHAR(MAX) NULL,
+        [capacity] INT NULL,
+        [images] NVARCHAR(MAX) NULL,
+        [status] VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+        [created_at] DATETIME DEFAULT GETDATE(),
+        [updated_at] DATETIME DEFAULT GETDATE(),
+        CONSTRAINT [chk_courts_status] CHECK ([status] IN ('ACTIVE', 'INACTIVE', 'CLOSED', 'MAINTENANCE'))
+      );
+    END
+
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[courts]') AND name = 'facility_id')
     BEGIN
       ALTER TABLE [dbo].[courts] ADD [facility_id] INT NULL;

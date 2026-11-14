@@ -126,10 +126,11 @@ export async function checkAccountStatus(req, res, next) {
  */
 export async function checkCourtOwnership(req, res, next) {
   try {
-    const courtId = parseInt(req.params.id);
-    if (!courtId) {
+    const rawId = req.params.id;
+    if (rawId === undefined || rawId === null || rawId === '' || isNaN(Number(rawId))) {
       return res.status(400).json({ success: false, message: 'ID sân không hợp lệ.' });
     }
+    const courtId = Number(rawId);
 
     const userRole = (req.user.role || '').toLowerCase();
     if (userRole === 'admin') {
@@ -167,10 +168,11 @@ export async function checkCourtOwnership(req, res, next) {
  */
 export async function checkBookingOwnership(req, res, next) {
   try {
-    const bookingId = parseInt(req.params.id);
-    if (!bookingId) {
+    const rawId = req.params.id;
+    if (rawId === undefined || rawId === null || rawId === '' || isNaN(Number(rawId))) {
       return res.status(400).json({ success: false, message: 'ID đặt sân không hợp lệ.' });
     }
+    const bookingId = Number(rawId);
 
     const userRole = (req.user.role || '').toLowerCase();
     if (userRole === 'admin') {
@@ -241,10 +243,11 @@ export async function checkStaffCourtAccess(req, res, next) {
     return next();
   }
 
-  const courtId = parseInt(req.params.courtId || req.body?.courtId || req.query?.courtId);
-  if (!courtId) {
+  const rawCourtId = req.params.courtId ?? req.body?.courtId ?? req.query?.courtId;
+  if (rawCourtId === undefined || rawCourtId === null || rawCourtId === '' || isNaN(Number(rawCourtId))) {
     return next();
   }
+  const courtId = Number(rawCourtId);
 
   try {
     const pool = await getPool();

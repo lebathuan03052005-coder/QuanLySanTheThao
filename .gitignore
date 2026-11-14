@@ -5,3 +5,5 @@ dist/
 dulieu/
 backend/uploads/*
 !backend/uploads/**/.gitkeep
+
+GEMINI.md

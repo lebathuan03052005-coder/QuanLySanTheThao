@@ -6,6 +6,8 @@ import {
   createCourt,
   updateCourt,
   deleteCourt,
+  getCourtPrices,
+  updateCourtPrices,
 } from './court.controller.js';
 
 const router = Router();
@@ -19,6 +21,10 @@ router.post('/', verifyToken, authorize('owner', 'admin'), createCourt);
 
 // Cập nhật thông tin sân: Yêu cầu xác thực + kiểm tra quyền sở hữu (chỉ sửa sân của chính mình)
 router.put('/:id', verifyToken, authorize('owner', 'admin'), checkCourtOwnership, updateCourt);
+
+// Biểu phí động của sân con (WBS 3.2 - S2-07): Xem công khai, cập nhật chỉ Chủ sân sở hữu
+router.get('/:id/prices', getCourtPrices);
+router.put('/:id/prices', verifyToken, authorize('owner', 'admin'), checkCourtOwnership, updateCourtPrices);
 
 // Xóa sân bóng: Yêu cầu xác thực + kiểm tra quyền sở hữu (chỉ xóa sân của chính mình)
 router.delete('/:id', verifyToken, authorize('owner', 'admin'), checkCourtOwnership, deleteCourt);
