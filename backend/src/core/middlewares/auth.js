@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { getPool } from '../config/db.js';
+import { getJwtSecret } from '../utils/crypto.js';
 
 /**
  * Middleware xác thực JWT Token (Authentication).
@@ -16,11 +17,16 @@ export function verifyToken(req, res, next) {
     });
   }
 
+  // JWT_SECRET là bắt buộc: thiếu cấu hình thì báo lỗi hệ thống, không dùng secret mặc định
+  let jwtSecret;
   try {
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'sportlink_jwt_super_secret_key_2026'
-    );
+    jwtSecret = getJwtSecret();
+  } catch (err) {
+    return next(err);
+  }
+
+  try {
+    const decoded = jwt.verify(token, jwtSecret);
     req.user = decoded;
     next();
   } catch (err) {
@@ -42,7 +48,7 @@ export function verifyToken(req, res, next) {
 
 /**
  * Middleware phân quyền RBAC (Role-Based Access Control).
- * @param {...string} roles - Danh sách vai trò được phép truy cập (ví dụ: 'admin', 'owner', 'staff', 'player').
+ * @param {...string} roles - Danh sách vai trò được phép truy cập (ví dụ: 'owner', 'staff', 'player').
  */
 export function authorize(...roles) {
   return (req, res, next) => {
@@ -55,11 +61,6 @@ export function authorize(...roles) {
 
     const userRole = (req.user.role || '').toLowerCase();
     const normalizedRoles = roles.map((r) => r.toLowerCase());
-
-    // Quản trị viên (admin) luôn có toàn quyền truy cập
-    if (userRole === 'admin') {
-      return next();
-    }
 
     // Kiểm tra xem vai trò của user có nằm trong danh sách được cấp phép không
     if (!normalizedRoles.includes(userRole)) {
@@ -132,11 +133,6 @@ export async function checkCourtOwnership(req, res, next) {
     }
     const courtId = Number(rawId);
 
-    const userRole = (req.user.role || '').toLowerCase();
-    if (userRole === 'admin') {
-      return next();
-    }
-
     const pool = await getPool();
     const result = await pool
       .request()
@@ -175,10 +171,6 @@ export async function checkBookingOwnership(req, res, next) {
     const bookingId = Number(rawId);
 
     const userRole = (req.user.role || '').toLowerCase();
-    if (userRole === 'admin') {
-      return next();
-    }
-
     const pool = await getPool();
     const result = await pool.request().input('id', bookingId).query(`
         SELECT b.booking_id, b.user_id, b.court_id, b.status, c.owner_id
@@ -239,9 +231,6 @@ export async function checkBookingOwnership(req, res, next) {
  */
 export async function checkStaffCourtAccess(req, res, next) {
   const userRole = (req.user?.role || '').toLowerCase();
-  if (userRole === 'admin') {
-    return next();
-  }
 
   const rawCourtId = req.params.courtId ?? req.body?.courtId ?? req.query?.courtId;
   if (rawCourtId === undefined || rawCourtId === null || rawCourtId === '' || isNaN(Number(rawCourtId))) {
