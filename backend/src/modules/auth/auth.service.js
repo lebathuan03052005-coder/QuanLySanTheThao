@@ -1,16 +1,17 @@
 const bcrypt = (await import('bcrypt').catch(() => import('bcryptjs'))).default;
 import jwt from 'jsonwebtoken';
 import { getPool } from '../../core/config/db.js';
+import { getJwtSecret } from '../../core/utils/crypto.js';
 import { AppError } from '../../core/errors/AppError.js';
 
 const SALT_ROUNDS = 12;
 
 /**
  * Đăng ký tài khoản người dùng mới theo schema trong mục dulieu (bảng users).
- * @param {{ fullName: string, email: string, password: string, phone?: string, role?: string }} data
+ * @param {{ fullName: string, email: string, password: string, phone?: string }} data
  */
 export async function register(data) {
-  const { fullName, email, password, phone = '', role = 'PLAYER' } = data;
+  const { fullName, email, password, phone = '' } = data;
 
   if (!fullName || !fullName.trim()) {
     throw new AppError('Họ và tên không được để trống.', 400);
@@ -23,8 +24,6 @@ export async function register(data) {
   }
 
   const cleanEmail = email.trim().toLowerCase();
-  const dbRole = (role || 'PLAYER').toUpperCase();
-
   const pool = await getPool();
 
   // Kiểm tra email hoặc phone đã tồn tại chưa
@@ -44,7 +43,8 @@ export async function register(data) {
     .input('phone', phone.trim() || `09${Math.floor(10000000 + Math.random() * 90000000)}`)
     .input('email', cleanEmail)
     .input('password', hashedPassword)
-    .input('role', dbRole)
+    // API đăng ký công khai luôn tạo PLAYER, không nhận role từ client
+    .input('role', 'PLAYER')
     .query(`
       INSERT INTO users (full_name, phone, email, password_hash, role, reputation_score, created_at)
       OUTPUT INSERTED.user_id, INSERTED.full_name, INSERTED.phone, INSERTED.email, INSERTED.role, INSERTED.created_at
@@ -120,7 +120,7 @@ export async function login(data) {
       email: user.email,
       fullName: user.full_name,
     },
-    process.env.JWT_SECRET || 'sportlink_jwt_super_secret_key_2026',
+    getJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 
@@ -148,25 +148,24 @@ export async function googleLogin(credential) {
     throw new AppError('Mã xác thực Google (credential) không được để trống.', 400);
   }
 
+  // 1. Xác thực ID Token trực tiếp với Google (bắt buộc, không giải mã cục bộ)
   let payload = null;
-
-  // 1. Cố gắng xác thực với Google tokeninfo endpoint
   try {
-    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
-    if (res.ok) {
-      payload = await res.json();
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+    );
+    if (!res.ok) {
+      throw new AppError('Token Google không hợp lệ hoặc đã hết hạn.', 401);
     }
+    payload = await res.json();
   } catch (err) {
-    // Nếu gặp sự cố mạng tạm thời, giải mã token
+    if (err instanceof AppError) throw err;
+    throw new AppError('Không thể xác thực token Google. Vui lòng thử lại.', 401);
   }
 
-  // Fallback an toàn: Giải mã payload JWT
-  if (!payload) {
-    payload = jwt.decode(credential);
-  }
-
-  if (!payload || !payload.email) {
-    throw new AppError('Token Google không hợp lệ hoặc không trích xuất được email.', 401);
+  // Chỉ chấp nhận token đã được Google xác thực và email đã xác minh
+  if (!payload || !payload.email || String(payload.email_verified) !== 'true') {
+    throw new AppError('Token Google không hợp lệ hoặc email chưa được xác minh.', 401);
   }
 
   const googleEmail = payload.email.trim().toLowerCase();
@@ -179,7 +178,7 @@ export async function googleLogin(credential) {
   // 2. Kiểm tra xem người dùng đã tồn tại trong bảng users chưa
   const result = await pool.request()
     .input('email', googleEmail)
-    .query('SELECT user_id, full_name, phone, email, role, avatar_url, created_at FROM users WHERE LOWER(email) = @email');
+    .query('SELECT user_id, full_name, phone, email, role, avatar_url, status, created_at FROM users WHERE LOWER(email) = @email');
 
   let user = result.recordset[0];
 
@@ -196,7 +195,7 @@ export async function googleLogin(credential) {
       .input('avatarUrl', googlePicture)
       .query(`
         INSERT INTO users (full_name, phone, email, password_hash, role, avatar_url, reputation_score, created_at)
-        OUTPUT INSERTED.user_id, INSERTED.full_name, INSERTED.phone, INSERTED.email, INSERTED.role, INSERTED.avatar_url, INSERTED.created_at
+        OUTPUT INSERTED.user_id, INSERTED.full_name, INSERTED.phone, INSERTED.email, INSERTED.role, INSERTED.avatar_url, INSERTED.status, INSERTED.created_at
         VALUES (@fullName, @phone, @email, @password, 'PLAYER', @avatarUrl, 5.0, GETDATE())
       `);
     user = insertResult.recordset[0];
@@ -213,9 +212,18 @@ export async function googleLogin(credential) {
     }
   }
 
+  // 4. Chặn tài khoản đã bị khóa hoặc ngừng hoạt động (đồng bộ với luồng đăng nhập email)
+  const googleUserStatus = (user.status || 'ACTIVE').toUpperCase();
+  if (googleUserStatus === 'LOCKED') {
+    throw new AppError('Tài khoản của bạn đã bị khóa. Vui lòng liên hệ chủ sân để được hỗ trợ.', 403);
+  }
+  if (googleUserStatus === 'INACTIVE') {
+    throw new AppError('Tài khoản này đã ngừng hoạt động trong hệ thống.', 403);
+  }
+
   const normalizedRole = (user.role || 'PLAYER').toLowerCase();
 
-  // 4. Ký SportLink JWT Token cho phiên làm việc
+  // 5. Ký SportLink JWT Token cho phiên làm việc
   const token = jwt.sign(
     {
       id: user.user_id,
@@ -223,7 +231,7 @@ export async function googleLogin(credential) {
       email: user.email,
       fullName: user.full_name,
     },
-    process.env.JWT_SECRET || 'sportlink_jwt_super_secret_key_2026',
+    getJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 

@@ -5,5 +5,9 @@ dist/
 dulieu/
 backend/uploads/*
 !backend/uploads/**/.gitkeep
+.freebuff
+
+*.tsbuildinfo
+tsconfig.tsbuildinfo
 
 GEMINI.md

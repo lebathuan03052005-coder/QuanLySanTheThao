@@ -1,13 +1,23 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, Link } from 'react-router';
+import { useSearchParams, Link, useNavigate } from 'react-router';
 import { fetchCourts, type CourtItem } from './court.api';
 import { getAllSportsApi } from '../sports/sport.api';
 import { formatCurrency } from '../../shared/utils/format';
+import { getFirstMediaUrl } from '../../shared/utils/media';
 import { createWalkInBookingApi } from '../booking/booking.api';
 import { useAuthStore } from '../../shared/stores/authStore';
+import {
+  isPastBookingSlot,
+  getLocalTodayIso,
+  getInitialBookingTimes,
+  BOOKING_START_TIMES,
+  BOOKING_END_TIMES,
+  timeToMinutes,
+} from '../../shared/utils/bookingTime';
 
 export default function CourtListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { user } = useAuthStore();
 
   const [keyword, setKeyword] = useState(searchParams.get('keyword') || '');
@@ -18,12 +28,48 @@ export default function CourtListPage() {
 
   // Modal đặt sân nhanh
   const [bookingCourt, setBookingCourt] = useState<CourtItem | null>(null);
-  const [bookingDate, setBookingDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [bookingStartTime, setBookingStartTime] = useState('17:00');
-  const [bookingEndTime, setBookingEndTime] = useState('18:30');
+  const [bookingDate, setBookingDate] = useState(() => getLocalTodayIso());
+  const [bookingStartTime, setBookingStartTime] = useState(() => getInitialBookingTimes(getLocalTodayIso()).startTime);
+  const [bookingEndTime, setBookingEndTime] = useState(() => getInitialBookingTimes(getLocalTodayIso()).endTime);
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState<string | null>(null);
   const [bookingErrorMsg, setBookingErrorMsg] = useState<string | null>(null);
+
+  // Mở modal đặt sân và tự động chọn khung giờ tương lai gần nhất
+  function handleOpenBooking(court: CourtItem) {
+    const initial = getInitialBookingTimes(getLocalTodayIso());
+    setBookingCourt(court);
+    setBookingDate(initial.bookingDate);
+    setBookingStartTime(initial.startTime);
+    setBookingEndTime(initial.endTime);
+    setBookingErrorMsg(null);
+    setBookingSuccessMsg(null);
+  }
+
+  // Khi đổi ngày đặt sân: tự động chỉnh giờ nếu khung giờ hiện tại bị rơi vào quá khứ
+  function handleBookingDateChange(newDate: string) {
+    setBookingDate(newDate);
+    setBookingErrorMsg(null);
+    if (isPastBookingSlot(newDate, bookingStartTime)) {
+      const nextTimes = getInitialBookingTimes(newDate);
+      setBookingStartTime(nextTimes.startTime);
+      setBookingEndTime(nextTimes.endTime);
+    }
+  }
+
+  // Khi đổi giờ bắt đầu: tự động tăng giờ kết thúc nếu giờ kết thúc <= giờ bắt đầu
+  function handleBookingStartTimeChange(newStart: string) {
+    setBookingStartTime(newStart);
+    setBookingErrorMsg(null);
+    const startMin = timeToMinutes(newStart);
+    const endMin = timeToMinutes(bookingEndTime);
+    if (endMin <= startMin) {
+      const newEndMin = Math.min(23 * 60, startMin + 90);
+      const endH = Math.floor(newEndMin / 60);
+      const endM = newEndMin % 60;
+      setBookingEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+    }
+  }
 
   // Tải danh mục thể thao
   useEffect(() => {
@@ -67,6 +113,18 @@ export default function CourtListPage() {
     if (!bookingCourt) return;
     if (!user) {
       alert('Vui lòng đăng nhập để đặt sân!');
+      return;
+    }
+
+    if (isPastBookingSlot(bookingDate, bookingStartTime)) {
+      setBookingErrorMsg(
+        `Khung giờ ${bookingStartTime} ngày ${bookingDate} đã ở trong quá khứ. Vui lòng chọn khung giờ trong tương lai.`
+      );
+      return;
+    }
+
+    if (timeToMinutes(bookingEndTime) <= timeToMinutes(bookingStartTime)) {
+      setBookingErrorMsg('Giờ kết thúc phải lớn hơn giờ bắt đầu.');
       return;
     }
 
@@ -198,68 +256,81 @@ export default function CourtListPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {courts.map((court) => (
-              <div
-                key={court.court_id}
-                className="bg-white rounded-2xl border border-gray-200/90 shadow-xs hover:shadow-md transition overflow-hidden flex flex-col justify-between group"
-              >
-                <div>
-                  {/* Ảnh sân */}
-                  <div className="relative h-44 w-full bg-gray-100 overflow-hidden">
-                    <img
-                      src={
-                        court.images ||
-                        'https://images.unsplash.com/photo-1529900245534-5e6922026142?w=500&auto=format&fit=crop&q=80'
-                      }
-                      alt={court.court_name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold bg-white/90 backdrop-blur-xs text-blue-700 shadow-xs">
-                      {court.sport_name || 'Bóng đá'}
-                    </span>
-                    <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white shadow-xs">
-                      {court.status || 'ACTIVE'}
-                    </span>
-                  </div>
+            {courts.map((court) => {
+              const facId = court.facility_id || 3;
+              const facilityUrl = `/facilities/${facId}?courtId=${court.court_id}#court-${court.court_id}`;
+              return (
+                <div
+                  key={court.court_id}
+                  onClick={() => navigate(facilityUrl)}
+                  className="bg-white rounded-2xl border border-gray-200/90 shadow-xs hover:shadow-xl hover:border-black/30 hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col justify-between group cursor-pointer"
+                  title={`Xem cụm sân mẹ & định vị sân: ${court.court_name}`}
+                >
+                  <div>
+                    {/* Ảnh sân */}
+                    <div className="relative h-44 w-full bg-gray-100 overflow-hidden">
+                      <img
+                        src={getFirstMediaUrl(
+                          court.images,
+                          'https://images.unsplash.com/photo-1529900245534-5e6922026142?w=500&auto=format&fit=crop&q=80'
+                        )}
+                        alt={court.court_name}
+                        onError={(e) => {
+                          e.currentTarget.src = '/nenHomePage.png';
+                        }}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                      <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold bg-white/90 backdrop-blur-xs text-blue-700 shadow-xs">
+                        {court.sport_name || 'Bóng đá'}
+                      </span>
+                      <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold bg-black text-white shadow-xs">
+                        {court.status || 'ACTIVE'}
+                      </span>
+                    </div>
 
-                  {/* Chi tiết sân */}
-                  <div className="p-5">
-                    <h3 className="font-extrabold text-base text-gray-900 group-hover:text-blue-600 transition-colors">
-                      {court.court_name}
-                    </h3>
-                    <p className="text-xs font-semibold text-gray-500 mt-0.5">
-                      {court.facility_name || 'Cơ sở trực thuộc'}
-                    </p>
-                    <p className="text-xs text-gray-600 mt-2 flex items-center gap-1.5">
-                      <span>📍</span>
-                      <span className="truncate">{court.address || court.facility_address || 'TP. Hồ Chí Minh'}</span>
-                    </p>
+                    {/* Chi tiết sân */}
+                    <div className="p-5">
+                      <h3 className="font-extrabold text-base text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1">
+                        {court.court_name}
+                      </h3>
+                      <p className="text-xs font-bold text-blue-600 mt-1 flex items-center gap-1">
+                        <span>🏢</span>
+                        <span className="hover:underline">{court.facility_name || 'Xem cụm sân mẹ'} →</span>
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1.5 flex items-center gap-1.5">
+                        <span>📍</span>
+                        <span className="truncate">{court.address || court.facility_address || 'TP. Hồ Chí Minh'}</span>
+                      </p>
 
-                    <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
-                      <span>Sức chứa: {court.capacity || 10} người</span>
-                      <span className="font-bold text-amber-500">★ 4.8</span>
+                      <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                        <span>Sức chứa: {court.capacity || 10} người</span>
+                        <span className="font-bold text-amber-500">★ 4.8</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Footer thẻ: Giá & Nút đặt sân */}
-                <div className="px-5 pb-5 pt-2 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-gray-400 block">Giá từ</span>
-                    <span className="text-base font-extrabold text-blue-600">
-                      {formatCurrency(court.price_per_hour || 200000)}/h
-                    </span>
+                  {/* Footer thẻ: Giá & Nút đặt sân */}
+                  <div className="px-5 pb-5 pt-2 flex items-center justify-between border-t border-gray-50">
+                    <div>
+                      <span className="text-[11px] text-gray-400 block">Giá từ</span>
+                      <span className="text-base font-extrabold text-black">
+                        {formatCurrency(court.price_per_hour || 200000)}/h
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenBooking(court);
+                      }}
+                      className="bg-black hover:bg-gray-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs active:scale-95 cursor-pointer"
+                    >
+                      Đặt ngay
+                    </button>
                   </div>
-
-                  <button
-                    onClick={() => setBookingCourt(court)}
-                    className="bg-[#1d63ed] hover:bg-blue-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-xs active:scale-95"
-                  >
-                    Đặt ngay
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -298,8 +369,8 @@ export default function CourtListPage() {
                 <input
                   type="date"
                   value={bookingDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setBookingDate(e.target.value)}
+                  min={getLocalTodayIso()}
+                  onChange={(e) => handleBookingDateChange(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
               </div>
@@ -309,16 +380,22 @@ export default function CourtListPage() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Giờ bắt đầu</label>
                   <select
                     value={bookingStartTime}
-                    onChange={(e) => setBookingStartTime(e.target.value)}
+                    onChange={(e) => handleBookingStartTimeChange(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
-                    {['06:00', '07:30', '09:00', '15:00', '16:30', '17:00', '18:00', '19:30', '20:00'].map(
-                      (t) => (
-                        <option key={t} value={t}>
-                          {t}
+                    {BOOKING_START_TIMES.map((t) => {
+                      const isPast = isPastBookingSlot(bookingDate, t);
+                      return (
+                        <option
+                          key={t}
+                          value={t}
+                          disabled={isPast}
+                          className={isPast ? 'text-gray-300 bg-gray-50' : 'text-gray-900'}
+                        >
+                          {t} {isPast ? '(Đã qua)' : ''}
                         </option>
-                      )
-                    )}
+                      );
+                    })}
                   </select>
                 </div>
                 <div>
@@ -328,7 +405,7 @@ export default function CourtListPage() {
                     onChange={(e) => setBookingEndTime(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
-                    {['07:30', '09:00', '10:30', '16:30', '18:00', '18:30', '19:30', '21:00', '21:30'].map(
+                    {BOOKING_END_TIMES.filter((t) => timeToMinutes(t) > timeToMinutes(bookingStartTime)).map(
                       (t) => (
                         <option key={t} value={t}>
                           {t}
@@ -338,6 +415,15 @@ export default function CourtListPage() {
                   </select>
                 </div>
               </div>
+
+              {isPastBookingSlot(bookingDate, bookingStartTime) && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-800 text-xs flex items-center gap-2">
+                  <span>⏰</span>
+                  <span>
+                    Khung giờ <strong>{bookingStartTime}</strong> ngày <strong>{bookingDate}</strong> đã ở trong quá khứ. Vui lòng chọn khung giờ trong tương lai.
+                  </span>
+                </div>
+              )}
 
               {bookingErrorMsg && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs">
@@ -356,17 +442,21 @@ export default function CourtListPage() {
               <button
                 type="button"
                 onClick={() => setBookingCourt(null)}
-                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg"
+                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
               >
                 Đóng
               </button>
               <button
                 type="button"
-                disabled={bookingSubmitting}
+                disabled={bookingSubmitting || isPastBookingSlot(bookingDate, bookingStartTime)}
                 onClick={handleConfirmBooking}
-                className="px-5 py-2.5 rounded-lg text-xs font-bold bg-[#1d63ed] text-white hover:bg-blue-700 transition shadow-md disabled:opacity-50"
+                className="px-5 py-2.5 rounded-lg text-xs font-bold bg-[#1d63ed] text-white hover:bg-blue-700 transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
-                {bookingSubmitting ? 'Đang gửi...' : 'Xác nhận đặt'}
+                {bookingSubmitting
+                  ? 'Đang gửi...'
+                  : isPastBookingSlot(bookingDate, bookingStartTime)
+                  ? 'Khung giờ đã qua'
+                  : 'Xác nhận đặt'}
               </button>
             </div>
           </div>

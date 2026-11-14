@@ -9,6 +9,8 @@ interface ImageCropModalProps {
   onClose: () => void;
   onConfirmCrop: (croppedFile: File) => Promise<void> | void;
   isProcessing?: boolean;
+  initialAspect?: number;
+  initialShape?: "round" | "rect";
 }
 
 export default function ImageCropModal({
@@ -17,12 +19,14 @@ export default function ImageCropModal({
   onClose,
   onConfirmCrop,
   isProcessing = false,
+  initialAspect = 1,
+  initialShape = "round",
 }: ImageCropModalProps) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [aspect, setAspect] = useState<number | undefined>(1); // Mặc định 1:1 cho avatar
-  const [cropShape, setCropShape] = useState<"round" | "rect">("round");
+  const [aspect, setAspect] = useState<number | undefined>(initialAspect);
+  const [cropShape, setCropShape] = useState<"round" | "rect">(initialShape);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 

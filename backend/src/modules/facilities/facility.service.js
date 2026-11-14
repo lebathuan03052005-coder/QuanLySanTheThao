@@ -12,6 +12,131 @@ import { AppError } from '../../core/errors/AppError.js';
  */
 
 /**
+ * Lấy danh sách toàn bộ cơ sở sân đang hoạt động (Public cho người chơi và trang chủ).
+ * Kèm danh sách các môn thể thao có trong cơ sở và khoảng giá.
+ */
+export async function getPublicFacilities() {
+  const pool = await getPool();
+
+  let latCol = `(SELECT AVG(CAST(cx.latitude AS FLOAT)) FROM courts cx
+                  WHERE cx.facility_id = f.facility_id AND cx.latitude IS NOT NULL)`;
+  let lngCol = `(SELECT AVG(CAST(cx.longitude AS FLOAT)) FROM courts cx
+                  WHERE cx.facility_id = f.facility_id AND cx.longitude IS NOT NULL)`;
+  let imgCol = `(SELECT TOP 1 cx.images FROM courts cx
+                  WHERE cx.facility_id = f.facility_id
+                    AND cx.images IS NOT NULL AND cx.images <> '')`;
+  try {
+    const colCheck = await pool.request().query(`
+      SELECT 
+        COL_LENGTH('facilities', 'lat') AS has_lat,
+        COL_LENGTH('facilities', 'lng') AS has_lng,
+        COL_LENGTH('facilities', 'images') AS has_img
+    `);
+    if (colCheck.recordset[0]?.has_lat !== null) {
+      latCol = 'f.lat';
+    }
+    if (colCheck.recordset[0]?.has_lng !== null) {
+      lngCol = 'f.lng';
+    }
+    if (colCheck.recordset[0]?.has_img !== null) {
+      imgCol = 'f.images';
+    }
+  } catch {}
+
+  const query = `
+    SELECT 
+      f.facility_id,
+      f.owner_id,
+      f.name,
+      f.address,
+      f.phone,
+      f.description,
+      f.status,
+      ${latCol} AS lat,
+      ${lngCol} AS lng,
+      ${imgCol} AS images,
+      (SELECT COUNT(*) FROM courts WHERE facility_id = f.facility_id AND status = 'ACTIVE') AS total_courts,
+      (SELECT STRING_AGG(x.sport_name, ', ')
+         FROM (SELECT DISTINCT s2.sport_name
+                 FROM courts c2
+                 JOIN sports s2 ON c2.sport_id = s2.sport_id
+                WHERE c2.facility_id = f.facility_id
+                  AND c2.status = 'ACTIVE') x
+      ) AS sports_list,
+      (SELECT MIN(pr.price)
+         FROM courts cp1 JOIN court_prices pr ON pr.court_id = cp1.court_id
+        WHERE cp1.facility_id = f.facility_id) AS min_price,
+      (SELECT MAX(pr2.price)
+         FROM courts cp2 JOIN court_prices pr2 ON pr2.court_id = cp2.court_id
+        WHERE cp2.facility_id = f.facility_id) AS max_price
+    FROM facilities f
+    WHERE f.status = 'ACTIVE'
+    ORDER BY f.facility_id ASC
+  `;
+  const result = await pool.request().query(query);
+  return result.recordset;
+}
+
+/**
+ * Lấy chi tiết công khai 1 cơ sở sân mẹ (Public cho người chơi).
+ */
+export async function getPublicFacilityById(facilityId) {
+  const pool = await getPool();
+  let latCol = 'NULL AS lat';
+  let lngCol = 'NULL AS lng';
+  let imgCol = 'NULL AS images';
+  try {
+    const colCheck = await pool.request().query(`
+      SELECT 
+        COL_LENGTH('facilities', 'lat') AS has_lat,
+        COL_LENGTH('facilities', 'lng') AS has_lng,
+        COL_LENGTH('facilities', 'images') AS has_img
+    `);
+    if (colCheck.recordset[0]?.has_lat !== null) {
+      latCol = 'f.lat';
+    }
+    if (colCheck.recordset[0]?.has_lng !== null) {
+      lngCol = 'f.lng';
+    }
+    if (colCheck.recordset[0]?.has_img !== null) {
+      imgCol = 'f.images';
+    }
+  } catch {}
+
+  const query = `
+    SELECT 
+      f.facility_id,
+      f.owner_id,
+      f.name,
+      f.address,
+      f.phone,
+      f.description,
+      f.status,
+      ${latCol} AS lat,
+      ${lngCol} AS lng,
+      ${imgCol} AS images,
+      (SELECT COUNT(*) FROM courts WHERE facility_id = f.facility_id AND status = 'ACTIVE') AS total_courts,
+      (SELECT STRING_AGG(x.sport_name, ', ')
+         FROM (SELECT DISTINCT s2.sport_name
+                 FROM courts c2
+                 JOIN sports s2 ON c2.sport_id = s2.sport_id
+                WHERE c2.facility_id = f.facility_id
+                  AND c2.status = 'ACTIVE') x
+      ) AS sports_list,
+      (SELECT MIN(pr.price)
+         FROM courts cp1 JOIN court_prices pr ON pr.court_id = cp1.court_id
+        WHERE cp1.facility_id = f.facility_id) AS min_price,
+      (SELECT MAX(pr2.price)
+         FROM courts cp2 JOIN court_prices pr2 ON pr2.court_id = cp2.court_id
+        WHERE cp2.facility_id = f.facility_id) AS max_price
+    FROM facilities f
+    WHERE f.facility_id = @facilityId AND f.status = 'ACTIVE'
+  `;
+  const result = await pool.request().input('facilityId', facilityId).query(query);
+  return result.recordset[0] || null;
+}
+
+/**
  * Lấy danh sách cơ sở thuộc quyền quản lý của OWNER hiện tại kèm danh sách tóm tắt các sân con bên trong.
  * @param {number} ownerId - ID chủ sân trích xuất từ JWT token
  * @param {{ search?: string, status?: string }} filters
@@ -124,16 +249,13 @@ export async function getFacilityById(facilityId, ownerId) {
         f.phone,
         f.description,
         f.status,
+        f.images,
         f.created_at,
         f.updated_at,
-        COUNT(c.court_id) AS total_courts,
-        SUM(CASE WHEN c.status = 'ACTIVE' THEN 1 ELSE 0 END) AS active_courts
+        (SELECT COUNT(*) FROM courts WHERE facility_id = f.facility_id) AS total_courts,
+        (SELECT COUNT(*) FROM courts WHERE facility_id = f.facility_id AND status = 'ACTIVE') AS active_courts
       FROM facilities f
-      LEFT JOIN courts c ON f.facility_id = c.facility_id
       WHERE f.facility_id = @facilityId AND f.owner_id = @ownerId
-      GROUP BY 
-        f.facility_id, f.owner_id, f.name, f.address, f.phone, 
-        f.description, f.status, f.created_at, f.updated_at
     `);
 
   const facility = result.recordset[0];
@@ -183,10 +305,10 @@ export async function createFacility(ownerId, data) {
  * Cập nhật thông tin cơ sở sân.
  * @param {number} facilityId
  * @param {number} ownerId
- * @param {{ name?: string, address?: string, phone?: string, description?: string }} data
+ * @param {{ name?: string, address?: string, phone?: string, description?: string, images?: string }} data
  */
 export async function updateFacility(facilityId, ownerId, data) {
-  const { name, address, phone, description } = data;
+  const { name, address, phone, description, images } = data;
 
   await getFacilityById(facilityId, ownerId);
 
@@ -198,24 +320,32 @@ export async function updateFacility(facilityId, ownerId, data) {
   }
 
   const pool = await getPool();
-  const result = await pool.request()
+  const request = pool.request()
     .input('facilityId', facilityId)
     .input('ownerId', ownerId)
     .input('name', name ? name.trim() : null)
     .input('address', address ? address.trim() : null)
     .input('phone', phone !== undefined ? phone.trim() : null)
-    .input('description', description !== undefined ? description.trim() : null)
-    .query(`
-      UPDATE facilities
-      SET 
-        name = COALESCE(@name, name),
-        address = COALESCE(@address, address),
-        phone = COALESCE(@phone, phone),
-        description = COALESCE(@description, description),
-        updated_at = GETDATE()
-      OUTPUT INSERTED.*
-      WHERE facility_id = @facilityId AND owner_id = @ownerId
-    `);
+    .input('description', description !== undefined ? description.trim() : null);
+
+  let imagesUpdateSql = '';
+  if (images !== undefined) {
+    request.input('images', images);
+    imagesUpdateSql = ', images = @images';
+  }
+
+  const result = await request.query(`
+    UPDATE facilities
+    SET 
+      name = COALESCE(@name, name),
+      address = COALESCE(@address, address),
+      phone = COALESCE(@phone, phone),
+      description = COALESCE(@description, description)
+      ${imagesUpdateSql},
+      updated_at = GETDATE()
+    OUTPUT INSERTED.*
+    WHERE facility_id = @facilityId AND owner_id = @ownerId
+  `);
 
   // Đồng bộ địa chỉ mới của cơ sở xuống các sân con trực thuộc
   if (address && address.trim()) {
@@ -226,6 +356,127 @@ export async function updateFacility(facilityId, ownerId, data) {
   }
 
   return result.recordset[0];
+}
+
+/**
+ * Trợ giúp phân tích chuỗi images thành danh sách ảnh
+ */
+export function parseFacilityImages(rawImages) {
+  if (!rawImages) return [];
+  if (typeof rawImages !== 'string') return Array.isArray(rawImages) ? rawImages : [];
+  const trimmed = rawImages.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {}
+  }
+  return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Thêm một hoặc nhiều ảnh mới vào thư viện ảnh của cơ sở sân mẹ
+ */
+export async function addFacilityImage(facilityId, userId, imageUrlOrUrls) {
+  const urls = Array.isArray(imageUrlOrUrls) ? imageUrlOrUrls : [imageUrlOrUrls];
+  const pool = await getPool();
+
+  const checkRes = await pool.request()
+    .input('facilityId', facilityId)
+    .query('SELECT facility_id, owner_id, images FROM facilities WHERE facility_id = @facilityId');
+  const facility = checkRes.recordset[0];
+  if (!facility) {
+    throw new AppError('Không tìm thấy cơ sở sân.', 404);
+  }
+
+  // Cho phép nếu là Owner của cơ sở này
+  if (Number(facility.owner_id) !== Number(userId)) {
+    throw new AppError('Bạn không có quyền quản trị ảnh của cơ sở này.', 403);
+  }
+
+  const currentImages = parseFacilityImages(facility.images);
+  for (const url of urls) {
+    if (url && typeof url === 'string' && !currentImages.includes(url.trim())) {
+      currentImages.push(url.trim());
+    }
+  }
+
+  const imagesJson = JSON.stringify(currentImages);
+  await pool.request()
+    .input('facilityId', facilityId)
+    .input('images', imagesJson)
+    .query('UPDATE facilities SET images = @images, updated_at = GETDATE() WHERE facility_id = @facilityId');
+
+  return currentImages;
+}
+
+export const addFacilityImages = addFacilityImage;
+
+/**
+ * Xóa một ảnh khỏi thư viện ảnh của cơ sở sân mẹ
+ */
+export async function deleteFacilityImage(facilityId, userId, imageUrl) {
+  const pool = await getPool();
+
+  const checkRes = await pool.request()
+    .input('facilityId', facilityId)
+    .query('SELECT facility_id, owner_id, images FROM facilities WHERE facility_id = @facilityId');
+  const facility = checkRes.recordset[0];
+  if (!facility) {
+    throw new AppError('Không tìm thấy cơ sở sân.', 404);
+  }
+
+  if (Number(facility.owner_id) !== Number(userId)) {
+    throw new AppError('Bạn không có quyền xóa ảnh của cơ sở này.', 403);
+  }
+
+  let currentImages = parseFacilityImages(facility.images);
+  currentImages = currentImages.filter((img) => img !== imageUrl);
+  const imagesJson = currentImages.length > 0 ? JSON.stringify(currentImages) : null;
+
+  await pool.request()
+    .input('facilityId', facilityId)
+    .input('images', imagesJson)
+    .query('UPDATE facilities SET images = @images, updated_at = GETDATE() WHERE facility_id = @facilityId');
+
+  return currentImages;
+}
+
+/**
+ * Cập nhật ảnh đại diện của một sân con (Court)
+ */
+export async function updateCourtImage(courtId, userId, imageUrl) {
+  const pool = await getPool();
+  const courtCheck = await pool.request()
+    .input('courtId', courtId)
+    .query(`
+      SELECT c.court_id, c.facility_id, c.owner_id, f.owner_id AS facility_owner_id
+      FROM courts c
+      LEFT JOIN facilities f ON c.facility_id = f.facility_id
+      WHERE c.court_id = @courtId
+    `);
+  const court = courtCheck.recordset[0];
+  if (!court) {
+    throw new AppError('Không tìm thấy sân thể thao.', 404);
+  }
+  if (
+    Number(court.owner_id) !== Number(userId) &&
+    Number(court.facility_owner_id) !== Number(userId)
+  ) {
+    throw new AppError('Bạn không có quyền chỉnh sửa ảnh của sân này.', 403);
+  }
+  await pool.request()
+    .input('courtId', courtId)
+    .input('images', imageUrl)
+    .query('UPDATE courts SET images = @images, updated_at = GETDATE() WHERE court_id = @courtId');
+  return { courtId, images: imageUrl };
+}
+
+/**
+ * Xóa ảnh của sân con
+ */
+export async function deleteCourtImage(courtId, userId) {
+  return updateCourtImage(courtId, userId, null);
 }
 
 /**

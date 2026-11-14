@@ -1,341 +1,705 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { getAllSportsApi, type SportItem } from '../sports/sport.api';
-import { fetchCourts, type CourtItem } from '../courts/court.api';
-import { createWalkInBookingApi } from '../booking/booking.api';
-import { useAuthStore } from '../../shared/stores/authStore';
-import { formatCurrency } from '../../shared/utils/format';
+import { useState, useEffect, useMemo, useRef, type FormEvent } from "react";
+import { Link } from "react-router";
+import { getAllSportsApi } from "../sports/sport.api";
+import { getPublicFacilitiesApi } from "../facilities/facility.api";
+import { formatCurrency } from "../../shared/utils/format";
+import { getMediaUrl, getFirstMediaUrl } from "../../shared/utils/media";
+import SportLinkMap from "./SportLinkMap";
 
-// Dữ liệu mẫu môn thể thao mặc định (fallback khi chưa khởi động backend)
-const DEFAULT_SPORTS: { id: number; name: string; icon: string }[] = [
-  { id: 1, name: 'Bóng đá', icon: '⚽' },
-  { id: 2, name: 'Cầu lông', icon: '🏸' },
-  { id: 3, name: 'Pickleball', icon: '🏓' },
-  { id: 4, name: 'Tennis', icon: '🎾' },
-  { id: 5, name: 'Bóng rổ', icon: '🏀' },
-  { id: 6, name: 'Bóng chuyền', icon: '🏐' },
+// Công thức Haversine tính khoảng cách đường chim bay giữa 2 tọa độ GPS (đơn vị: km)
+export function calculateDistanceKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
+// Component biểu tượng Thể thao đơn sắc Trắng - Đen (Monochrome Black & White)
+export function SportIconMono({
+  name,
+  className = "w-3.5 h-3.5",
+}: {
+  name: string;
+  className?: string;
+}) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("bóng đá") || n.includes("football")) {
+    return (
+      <svg
+        className={`${className} shrink-0`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="12" cy="12" r="9" strokeWidth="1.8" />
+        <path
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="m12 8 3 2.2v3.6L12 16l-3-2.2v-3.6zM12 8V3m3 2.2 4-1.5m-1 7.1 3.5 1.7M12 16v5m-3-7.8-3.5 1.7m1-7.1-4-1.5"
+        />
+      </svg>
+    );
+  }
+  if (n.includes("cầu lông") || n.includes("badminton")) {
+    return (
+      <svg
+        className={`${className} shrink-0`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 19a3 3 0 100-6 3 3 0 000 6z"
+        />
+        <path
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M9.5 13.5L5 4h14l-4.5 9.5M12 4v9"
+        />
+      </svg>
+    );
+  }
+  if (n.includes("pickleball")) {
+    return (
+      <svg
+        className={`${className} shrink-0`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <rect x="5" y="3" width="10" height="12" rx="4" strokeWidth="1.8" />
+        <path strokeWidth="1.8" strokeLinecap="round" d="M10 15v6M8 21h4" />
+        <circle cx="18" cy="7" r="2.5" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+  if (n.includes("tennis") || n.includes("quần vợt")) {
+    return (
+      <svg
+        className={`${className} shrink-0`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="10" cy="10" r="7" strokeWidth="1.8" />
+        <path
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          d="M15 15l6 6M7 10h6M10 7v6"
+        />
+      </svg>
+    );
+  }
+  if (n.includes("bóng rổ") || n.includes("basketball")) {
+    return (
+      <svg
+        className={`${className} shrink-0`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="12" cy="12" r="9" strokeWidth="1.8" />
+        <path
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          d="M3 12h18M12 3v18M5 5c3 3 3 11 0 14M19 5c-3 3-3 11 0 14"
+        />
+      </svg>
+    );
+  }
+  if (n.includes("bóng chuyền") || n.includes("volleyball")) {
+    return (
+      <svg
+        className={`${className} shrink-0`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="12" cy="12" r="9" strokeWidth="1.8" />
+        <path
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          d="M12 12c0-5 3-9 3-9M12 12c-4-3-8-2-9-1M12 12c3 4 5 8 5 9"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      className={`${className} shrink-0`}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="9" strokeWidth="1.8" />
+      <path strokeWidth="1.6" strokeLinecap="round" d="M12 8v8M8 12h8" />
+    </svg>
+  );
+}
+
+// Component Dropdown chọn Môn thể thao tùy biến giao diện cao cấp
+interface SportSelectDropdownProps {
+  sportsList: { id: number; name: string }[];
+  selectedSportId: string;
+  onSelectSport: (id: string) => void;
+}
+
+function SportSelectDropdown({
+  sportsList,
+  selectedSportId,
+  onSelectSport,
+}: SportSelectDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Đóng dropdown khi click ra ngoài
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen]);
+
+  const currentSport = sportsList.find((s) => String(s.id) === selectedSportId);
+  const selectedLabel =
+    selectedSportId === "ALL"
+      ? "Tất cả môn thể thao"
+      : (currentSport?.name ?? "Chọn môn");
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      {/* Nút bấm hiển thị môn thể thao đang chọn */}
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex items-center gap-2.5 px-3.5 py-2 text-left w-full hover:bg-gray-50 rounded-xl transition cursor-pointer select-none focus:outline-none"
+        title="Chọn môn thể thao"
+      >
+        <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-800 shrink-0">
+          <SportIconMono
+            name={selectedSportId === "ALL" ? "all" : currentSport?.name || ""}
+            className="w-4 h-4 text-gray-900"
+          />
+        </div>
+
+        <span className="text-sm font-bold text-gray-800 truncate max-w-[155px]">
+          {selectedLabel}
+        </span>
+
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ml-1 shrink-0 ${
+            isOpen ? "rotate-180 text-gray-800" : ""
+          }`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {/* Menu xổ xuống giao diện hiện đại */}
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 p-2 z-50 animate-in fade-in duration-150">
+          <div className="px-2 py-1.5 text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+            Thể loại thể thao
+          </div>
+
+          {/* Lựa chọn Tất cả */}
+          <button
+            type="button"
+            onClick={() => {
+              onSelectSport("ALL");
+              setIsOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition ${
+              selectedSportId === "ALL"
+                ? "bg-black text-white font-bold shadow-xs"
+                : "text-gray-800 hover:bg-gray-100 font-medium"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                  selectedSportId === "ALL"
+                    ? "bg-white/20 text-white"
+                    : "bg-gray-100 text-gray-800"
+                }`}
+              >
+                <SportIconMono name="all" className="w-4 h-4" />
+              </div>
+              <span className="text-xs sm:text-sm">Tất cả môn thể thao</span>
+            </div>
+            {selectedSportId === "ALL" && (
+              <span className="text-xs font-black">✓</span>
+            )}
+          </button>
+
+          <div className="my-1.5 border-t border-gray-100" />
+
+          {/* Danh sách từng môn thể thao */}
+          <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
+            {sportsList.map((sport) => {
+              const isSelected = selectedSportId === String(sport.id);
+              return (
+                <button
+                  key={sport.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectSport(String(sport.id));
+                    setIsOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition ${
+                    isSelected
+                      ? "bg-black text-white font-bold shadow-xs"
+                      : "text-gray-800 hover:bg-gray-100 font-medium"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        isSelected
+                          ? "bg-white/20 text-white"
+                          : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      <SportIconMono name={sport.name} className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs sm:text-sm">{sport.name}</span>
+                  </div>
+                  {isSelected && <span className="text-xs font-black">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Kiểu dữ liệu nội bộ cho cơ sở sân mẹ (không phụ thuộc PublicFacilityItem optional fields)
+interface FacilitySeed {
+  facility_id: number;
+  name: string;
+  address: string;
+  phone: string;
+  description: string;
+  status: string;
+  total_courts: number;
+  min_price: number;
+  max_price: number;
+  sports: string[];
+  lat: number;
+  lng: number;
+  images: string;
+}
+
+// Danh sách Cụm Sân Mẹ (Cơ sở) Thật theo CSDL Sprint 2 kèm Tọa độ địa lý thực tế tại TP. Thủ Đức & TP.HCM
+const REAL_FACILITIES_SEED: FacilitySeed[] = [
+  {
+    facility_id: 1,
+    name: "Cụm Sân Bóng Đá SportLink Man Thiện",
+    address: "Số 106 Đường Man Thiện, P. Tăng Nhơn Phú A, TP. Thủ Đức, TP.HCM",
+    phone: "0901 234 567",
+    description:
+      "Tổ hợp sân bóng đá cỏ nhân tạo và sân đa năng gần Học viện Công nghệ Bưu chính Viễn thông (PTIT).",
+    status: "ACTIVE",
+    total_courts: 5,
+    min_price: 150000,
+    max_price: 250000,
+    sports: ["Bóng đá", "Pickleball", "Tennis", "Bóng rổ", "Bóng chuyền"],
+    lat: 10.8495,
+    lng: 106.7905,
+    images: "/facilities/man-thien/thumb.jpg",
+  },
+  {
+    facility_id: 2,
+    name: "CLB Cầu Lông SportLink Arena Hiệp Phú",
+    address: "Số 112 Lê Văn Việt, P. Hiệp Phú, TP. Thủ Đức, TP.HCM",
+    phone: "0901 234 568",
+    description:
+      "Tổ hợp sân cầu lông trong nhà thảm PVC chuẩn thi đấu Yonex, có máy lạnh khu vực chờ.",
+    status: "ACTIVE",
+    total_courts: 3,
+    min_price: 120000,
+    max_price: 180000,
+    sports: ["Cầu lông", "Bóng chuyền"],
+    lat: 10.849,
+    lng: 106.777,
+    images: "/facilities/hiep-phu/thumb.jpg",
+  },
+  {
+    facility_id: 3,
+    name: "Trung Tâm Pickleball & Tennis SportLink SHTP",
+    address: "Số 45 Đường D2, Khu Công Nghệ Cao, TP. Thủ Đức, TP.HCM",
+    phone: "0902 000 002",
+    description:
+      "Tổ hợp sân Pickleball, Tennis và Bóng đá tiêu chuẩn quốc tế ngay trong lòng Khu Công Nghệ Cao.",
+    status: "ACTIVE",
+    total_courts: 9,
+    min_price: 180000,
+    max_price: 280000,
+    sports: ["Pickleball", "Tennis", "Bóng đá"],
+    lat: 10.854,
+    lng: 106.798,
+    images: "/facilities/shtp/thumb.jpg",
+  },
+  {
+    facility_id: 4,
+    name: "Nhà Thi Đấu Đa Năng Đặng Văn Bi Thủ Đức",
+    address: "Số 88 Đặng Văn Bi, P. Bình Thọ, TP. Thủ Đức, TP.HCM",
+    phone: "0902 000 088",
+    description:
+      "Nhà thi đấu Bóng rổ, Cầu lông và Bóng chuyền trong nhà hiện đại với khán đài và sàn gỗ chuyên nghiệp.",
+    status: "ACTIVE",
+    total_courts: 9,
+    min_price: 150000,
+    max_price: 220000,
+    sports: ["Bóng rổ", "Cầu lông", "Bóng chuyền"],
+    lat: 10.851,
+    lng: 106.762,
+    images: "/facilities/dang-van-bi/thumb.jpg",
+  },
+  {
+    facility_id: 5,
+    name: "Tổ Hợp Thể Thao Làng Đại Học Thủ Đức - Khu A",
+    address: "Đường Tạ Quang Bửu, KĐT ĐHQG, P. Linh Trung, TP. Thủ Đức, TP.HCM",
+    phone: "0903 000 003",
+    description:
+      "Khu liên hợp thể thao đa năng đầy đủ 6 môn thể thao phục vụ sinh viên Làng Đại học Quốc gia TP.HCM.",
+    status: "ACTIVE",
+    total_courts: 9,
+    min_price: 100000,
+    max_price: 200000,
+    sports: [
+      "Bóng đá",
+      "Cầu lông",
+      "Pickleball",
+      "Tennis",
+      "Bóng rổ",
+      "Bóng chuyền",
+    ],
+    lat: 10.875,
+    lng: 106.802,
+    images: "/facilities/lang-dai-hoc-a/thumb.jpg",
+  },
+  {
+    facility_id: 6,
+    name: "Trung Tâm Thể Thao Sinh Viên ĐHQG - Khu B",
+    address:
+      "Đường Nguyễn Du, KTX Khu B ĐHQG, P. Đông Hòa, Dĩ An / TP. Thủ Đức",
+    phone: "0903 000 004",
+    description:
+      "Tổ hợp sân Pickleball, Tennis và Bóng rổ hiện đại ngay cạnh Ký Túc Xá Khu B ĐHQG TP.HCM.",
+    status: "ACTIVE",
+    total_courts: 9,
+    min_price: 120000,
+    max_price: 220000,
+    sports: ["Pickleball", "Tennis", "Bóng rổ", "Bóng chuyền", "Cầu lông"],
+    lat: 10.882,
+    lng: 106.782,
+    images: "/facilities/lang-dai-hoc-b/thumb.jpg",
+  },
 ];
 
-// Danh sách sân mẫu phổ biến (chuẩn theo mockup và CSDL thực tế)
-const INITIAL_POPULAR_COURTS: CourtItem[] = [
-  {
-    court_id: 101,
-    court_name: 'Sân An Phú',
-    facility_name: 'CLB Thể Thao An Phú',
-    address: 'Quận 2, TP.HCM',
-    sport_id: 1,
-    sport_name: 'Bóng đá',
-    price_per_hour: 220000,
-    owner_id: 1,
-    status: 'ACTIVE',
-    rating: 4.8,
-    rating_count: 1240,
-    images: 'https://images.unsplash.com/photo-1529900245534-5e6922026142?w=500&auto=format&fit=crop&q=80',
-    description: 'Sân cỏ nhân tạo 7 người cao cấp chuẩn FIFA, dàn đèn cao áp chống chói.',
-  },
-  {
-    court_id: 102,
-    court_name: 'Sân Bình Thạnh',
-    facility_name: 'Trung Tâm Thể Thao Bình Thạnh',
-    address: 'Bình Thạnh, TP.HCM',
-    sport_id: 1,
-    sport_name: 'Bóng đá',
-    price_per_hour: 200000,
-    owner_id: 2,
-    status: 'ACTIVE',
-    rating: 4.7,
-    rating_count: 856,
-    images: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=500&auto=format&fit=crop&q=80',
-    description: 'Cụm 4 sân bóng đá 5 người mặt cỏ kim cương, bãi đỗ xe ô tô rộng rãi.',
-  },
-  {
-    court_id: 103,
-    court_name: 'Sân Phú Nhuận',
-    facility_name: 'Sân Vận Động Phú Nhuận',
-    address: 'Phú Nhuận, TP.HCM',
-    sport_id: 1,
-    sport_name: 'Bóng đá',
-    price_per_hour: 250000,
-    owner_id: 1,
-    status: 'ACTIVE',
-    rating: 4.6,
-    rating_count: 742,
-    images: 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=500&auto=format&fit=crop&q=80',
-    description: 'Mặt sân thoát nước cực tốt, hỗ trợ cho thuê áo pitch và bóng thi đấu.',
-  },
-  {
-    court_id: 104,
-    court_name: 'Sân Pickleball SHTP Arena',
-    facility_name: 'Trung Tâm Pickleball & Tennis SportLink SHTP',
-    address: 'Khu Công Nghệ Cao, TP. Thủ Đức, TP.HCM',
-    sport_id: 3,
-    sport_name: 'Pickleball',
-    price_per_hour: 180000,
-    owner_id: 2,
-    status: 'ACTIVE',
-    rating: 4.9,
-    rating_count: 512,
-    images: 'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?w=500&auto=format&fit=crop&q=80',
-    description: 'Sân Pickleball mái che cao 8m, mặt sơn Acrylic chuẩn thi đấu quốc tế.',
-  },
-  {
-    court_id: 105,
-    court_name: 'CLB Cầu Lông Arena Hiệp Phú',
-    facility_name: 'CLB Cầu Lông SportLink Arena Hiệp Phú',
-    address: '112 Lê Văn Việt, P. Hiệp Phú, TP. Thủ Đức, TP.HCM',
-    sport_id: 2,
-    sport_name: 'Cầu lông',
-    price_per_hour: 120000,
-    owner_id: 1,
-    status: 'ACTIVE',
-    rating: 4.8,
-    rating_count: 930,
-    images: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=500&auto=format&fit=crop&q=80',
-    description: 'Thảm PVC chuẩn Yonex chống trượt cổ chân, phòng thay đồ và máy lạnh khu chờ.',
-  },
-  {
-    court_id: 106,
-    court_name: 'Sân Tennis Mặt Cứng Man Thiện',
-    facility_name: 'Cụm Sân Thể Thao Man Thiện',
-    address: '106 Đường Man Thiện, P. Tăng Nhơn Phú A, TP. Thủ Đức',
-    sport_id: 4,
-    sport_name: 'Tennis',
-    price_per_hour: 280000,
-    owner_id: 1,
-    status: 'ACTIVE',
-    rating: 4.7,
-    rating_count: 360,
-    images: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?w=500&auto=format&fit=crop&q=80',
-    description: 'Sân quần vợt Hard Court chất lượng cao, lưới cáp thép chuẩn giải đấu.',
-  },
+// Khóa nhận diện cơ sở mẫu: chỉ đối chiếu theo TÊN/ĐỊA CHỈ.
+// Không khớp theo id vì id trong DB thực tế là 3, 4, 7, 8, 9, 10 — khớp theo id sẽ gán nhầm ảnh/toạ độ.
+const SEED_MATCHERS: { seedId: number; keywords: string[] }[] = [
+  { seedId: 6, keywords: ['khu b', 'nguyễn du', 'đông hòa', 'dĩ an'] },
+  { seedId: 5, keywords: ['khu a', 'làng đại học', 'tạ quang bửu'] },
+  { seedId: 1, keywords: ['man thiện', 'ptit'] },
+  { seedId: 2, keywords: ['hiệp phú', 'lê văn việt'] },
+  { seedId: 3, keywords: ['shtp', 'công nghệ cao', 'đường d2'] },
+  { seedId: 4, keywords: ['đặng văn bi', 'bình thọ'] },
 ];
 
-// Tọa độ giả lập các pin sân trên bản đồ mini
-const MAP_PINS = [
-  { id: 101, x: '68%', y: '60%', name: 'Sân An Phú', area: 'Quận 2', sport: 'Bóng đá' },
-  { id: 102, x: '35%', y: '45%', name: 'Sân Bình Thạnh', area: 'Bình Thạnh', sport: 'Bóng đá' },
-  { id: 103, x: '55%', y: '78%', name: 'Sân Phú Nhuận', area: 'Phú Nhuận', sport: 'Bóng đá' },
-  { id: 104, x: '82%', y: '35%', name: 'Pickleball SHTP', area: 'Thủ Đức', sport: 'Pickleball' },
-  { id: 105, x: '25%', y: '65%', name: 'Cầu Lông Arena', area: 'Thủ Đức', sport: 'Cầu lông' },
-];
+/**
+ * Tìm dữ liệu mẫu (ảnh/toạ độ/mô tả) của một cơ sở DB.
+ * Chỉ dùng để bổ sung phần còn thiếu — không bao giờ quyết định danh sách cơ sở hiển thị.
+ */
+export function resolveFacilitySeed(item: {
+  facility_id?: number;
+  name?: string;
+  address?: string;
+}): FacilitySeed | undefined {
+  const text = `${item.name || ''} ${item.address || ''}`.toLowerCase();
+  const matcher = SEED_MATCHERS.find((m) => m.keywords.some((k) => text.includes(k)));
+  return matcher ? REAL_FACILITIES_SEED.find((s) => s.facility_id === matcher.seedId) : undefined;
+}
+
+// Số cơ sở mỗi trang
+const ITEMS_PER_PAGE = 3;
 
 export default function PlayerHomePage() {
-  const navigate = useNavigate();
-  const { user } = useAuthStore();
-
-  // 1. Quản lý State cho Bộ lọc tìm kiếm
-  const [keyword, setKeyword] = useState('');
-  const [selectedSportId, setSelectedSportId] = useState<string>('ALL');
+  // ── State bộ lọc tìm kiếm ──────────────────────────────────────────────────
+  const [keyword, setKeyword] = useState("");
+  const [selectedSportId, setSelectedSportId] = useState<string>("ALL");
   const [selectedDate, setSelectedDate] = useState<string>(() => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
+    return new Date().toISOString().split("T")[0];
   });
 
-  // 2. Danh sách môn thể thao & Danh sách sân từ API
-  const [sportsList, setSportsList] = useState<{ id: number; name: string }[]>([]);
-  const [courts, setCourts] = useState<CourtItem[]>(INITIAL_POPULAR_COURTS);
-  const [loadingCourts, setLoadingCourts] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  // ── State dữ liệu ──────────────────────────────────────────────────────────
+  const [sportsList, setSportsList] = useState<{ id: number; name: string }[]>(
+    [],
+  );
+  const [facilities, setFacilities] =
+    useState<FacilitySeed[]>(REAL_FACILITIES_SEED);
 
-  // 3. Pin bản đồ được click chọn
-  const [activePin, setActivePin] = useState<number | null>(101);
+  // ── State cơ sở đang chọn & phân trang ────────────────────────────────────
+  const [selectedFacilityId, setSelectedFacilityId] = useState<number | null>(
+    REAL_FACILITIES_SEED[0]?.facility_id ?? null,
+  );
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // 4. Modal đặt sân nhanh
-  const [bookingCourt, setBookingCourt] = useState<CourtItem | null>(null);
-  const [bookingStartTime, setBookingStartTime] = useState('17:00');
-  const [bookingEndTime, setBookingEndTime] = useState('18:30');
-  const [bookingSubmitting, setBookingSubmitting] = useState(false);
-  const [bookingSuccessMsg, setBookingSuccessMsg] = useState<string | null>(null);
-  const [bookingErrorMsg, setBookingErrorMsg] = useState<string | null>(null);
-
-  // Lấy danh mục môn thể thao từ Backend (hoặc dùng fallback)
+  // ── Nạp danh mục thể thao từ Backend ──────────────────────────────────────
   useEffect(() => {
     getAllSportsApi()
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setSportsList(data.map((s) => ({ id: s.sport_id, name: s.sport_name })));
+          setSportsList(
+            data.map((s) => ({ id: s.sport_id, name: s.sport_name })),
+          );
         } else {
-          setSportsList(DEFAULT_SPORTS.map((s) => ({ id: s.id, name: s.name })));
+          setSportsList([
+            { id: 1, name: "Bóng đá" },
+            { id: 2, name: "Cầu lông" },
+            { id: 3, name: "Pickleball" },
+            { id: 4, name: "Tennis" },
+            { id: 5, name: "Bóng rổ" },
+            { id: 6, name: "Bóng chuyền" },
+          ]);
         }
       })
       .catch(() => {
-        setSportsList(DEFAULT_SPORTS.map((s) => ({ id: s.id, name: s.name })));
+        setSportsList([
+          { id: 1, name: "Bóng đá" },
+          { id: 2, name: "Cầu lông" },
+          { id: 3, name: "Pickleball" },
+          { id: 4, name: "Tennis" },
+          { id: 5, name: "Bóng rổ" },
+          { id: 6, name: "Bóng chuyền" },
+        ]);
       });
   }, []);
 
-  // Tải danh sách sân từ API khi mở trang
+  // ── Nạp danh sách cụm sân mẹ từ API, merge hai chiều với seed data ─────────
   useEffect(() => {
-    fetchCourts()
+    getPublicFacilitiesApi()
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          // Bổ sung ảnh và rating mặc định nếu backend trả về null
-          const enriched = data.map((c, idx) => ({
-            ...c,
-            rating: c.rating || Number((4.6 + (idx % 4) * 0.1).toFixed(1)),
-            rating_count: c.rating_count || 500 + (idx * 137) % 800,
-            images:
-              c.images ||
-              INITIAL_POPULAR_COURTS[idx % INITIAL_POPULAR_COURTS.length].images,
-          }));
-          setCourts(enriched);
+          // 1. Duyệt qua TẤT CẢ cơ sở từ DB để hiển thị đầy đủ (kể cả cơ sở ID 7+)
+          const mergedFromApi: FacilitySeed[] = data.map((apiItem, idx) => {
+            // Đối chiếu thông minh theo ID hoặc Tên/Địa chỉ
+            const seedMatch = resolveFacilitySeed(apiItem);
+
+            const sportsArr = apiItem.sports_list
+              ? apiItem.sports_list.split(",").map((s: string) => s.trim())
+              : seedMatch?.sports || ["Thể thao đa năng"];
+
+            // Ưu tiên: lat/lng từ API nếu có; nếu không thì lấy từ seedMatch; nếu cơ sở mới thì phân bố quanh Thủ Đức
+            const lat =
+              apiItem.lat && !isNaN(Number(apiItem.lat))
+                ? Number(apiItem.lat)
+                : seedMatch?.lat || 10.845 + (idx % 6) * 0.008;
+            const lng =
+              apiItem.lng && !isNaN(Number(apiItem.lng))
+                ? Number(apiItem.lng)
+                : seedMatch?.lng || 106.775 + (idx % 6) * 0.009;
+
+            // Ưu tiên: images từ API nếu có; nếu không thì lấy theo seedMatch tương ứng tên cơ sở
+            const images = getFirstMediaUrl(
+              apiItem.images,
+              seedMatch?.images || "/nenHomePage.png"
+            );
+
+            return {
+              facility_id: apiItem.facility_id,
+              name:
+                apiItem.name ||
+                seedMatch?.name ||
+                `Cơ sở #${apiItem.facility_id}`,
+              address:
+                apiItem.address || seedMatch?.address || "TP. Thủ Đức, TP.HCM",
+              phone: apiItem.phone || seedMatch?.phone || "0901 234 567",
+              description: apiItem.description || seedMatch?.description || "",
+              status: apiItem.status || "ACTIVE",
+              total_courts:
+                Number(apiItem.total_courts) || seedMatch?.total_courts || 1,
+              min_price:
+                apiItem.min_price != null
+                  ? Number(apiItem.min_price)
+                  : seedMatch?.min_price || 120000,
+              max_price:
+                apiItem.max_price != null
+                  ? Number(apiItem.max_price)
+                  : seedMatch?.max_price || 250000,
+              sports: sportsArr,
+              lat,
+              lng,
+              images,
+            };
+          });
+
+          // 2. API là nguồn dữ liệu chính: chỉ hiển thị các cơ sở đang có thật trong DB
+          //    (kể cả cơ sở mới thêm với id 11+); seed chỉ bổ sung ảnh/toạ độ còn thiếu.
+          setFacilities(mergedFromApi);
+          if (mergedFromApi.length > 0) {
+            setSelectedFacilityId(mergedFromApi[0].facility_id);
+          }
         }
       })
       .catch(() => {
-        // Giữ fallback INITIAL_POPULAR_COURTS
+        // Fallback: giữ nguyên REAL_FACILITIES_SEED khi API lỗi
       });
   }, []);
 
-  // Thực hiện tìm kiếm khi người dùng bấm nút Tìm kiếm
-  async function handleSearch(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    setLoadingCourts(true);
-    setHasSearched(true);
+  // ── Reset phân trang khi thay đổi bộ lọc ──────────────────────────────────
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [keyword, selectedSportId]);
 
-    try {
-      const params: { keyword?: string; sport_id?: string } = {};
-      if (keyword.trim()) params.keyword = keyword.trim();
-      if (selectedSportId !== 'ALL') params.sport_id = selectedSportId;
+  // ── Lọc cơ sở theo từ khóa và môn thể thao ────────────────────────────────
+  const filteredFacilities = useMemo(() => {
+    return facilities.filter((fac) => {
+      const kw = keyword.trim().toLowerCase();
+      const matchKeyword =
+        !kw ||
+        fac.name.toLowerCase().includes(kw) ||
+        fac.address.toLowerCase().includes(kw) ||
+        fac.sports.some((s) => s.toLowerCase().includes(kw));
 
-      const data = await fetchCourts(params);
-      if (Array.isArray(data) && data.length > 0) {
-        const enriched = data.map((c, idx) => ({
-          ...c,
-          rating: c.rating || Number((4.6 + (idx % 4) * 0.1).toFixed(1)),
-          rating_count: c.rating_count || 600 + (idx * 115) % 700,
-          images:
-            c.images ||
-            INITIAL_POPULAR_COURTS[idx % INITIAL_POPULAR_COURTS.length].images,
-        }));
-        setCourts(enriched);
-      } else {
-        // Lọc client-side trên danh sách hiện tại nếu backend chưa đủ data
-        const filtered = INITIAL_POPULAR_COURTS.filter((c) => {
-          const matchKw =
-            !keyword.trim() ||
-            c.court_name.toLowerCase().includes(keyword.toLowerCase()) ||
-            (c.address || '').toLowerCase().includes(keyword.toLowerCase()) ||
-            (c.facility_name || '').toLowerCase().includes(keyword.toLowerCase());
-          const matchSport =
-            selectedSportId === 'ALL' || String(c.sport_id) === String(selectedSportId);
-          return matchKw && matchSport;
-        });
-        setCourts(filtered);
-      }
-    } catch {
-      // Fallback lọc client-side
-      const filtered = INITIAL_POPULAR_COURTS.filter((c) => {
-        const matchKw =
-          !keyword.trim() ||
-          c.court_name.toLowerCase().includes(keyword.toLowerCase()) ||
-          (c.address || '').toLowerCase().includes(keyword.toLowerCase());
-        const matchSport =
-          selectedSportId === 'ALL' || String(c.sport_id) === String(selectedSportId);
-        return matchKw && matchSport;
-      });
-      setCourts(filtered);
-    } finally {
-      setLoadingCourts(false);
+      const selectedSportName =
+        selectedSportId !== "ALL"
+          ? sportsList
+              .find((s) => String(s.id) === selectedSportId)
+              ?.name?.toLowerCase()
+          : null;
+
+      const matchSport =
+        !selectedSportName ||
+        fac.sports.some((s) => s.toLowerCase().includes(selectedSportName));
+
+      return matchKeyword && matchSport;
+    });
+  }, [facilities, keyword, selectedSportId, sportsList]);
+
+  // ── Phân trang ─────────────────────────────────────────────────────────────
+  const totalPages = Math.ceil(filteredFacilities.length / ITEMS_PER_PAGE) || 1;
+  const paginatedFacilities = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredFacilities.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredFacilities, currentPage]);
+
+  // ── Xử lý tìm kiếm ────────────────────────────────────────────────────────
+  function handleSearchSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (filteredFacilities.length > 0) {
+      setSelectedFacilityId(filteredFacilities[0].facility_id);
     }
   }
 
-  // Danh sách 3 sân hiển thị ở cột "Sân bóng phổ biến" bên phải
-  const popularThreeCourts = useMemo(() => {
-    return courts.slice(0, 3);
-  }, [courts]);
-
-  // Xử lý xác nhận đặt sân nhanh
-  async function handleConfirmQuickBooking() {
-    if (!bookingCourt) return;
-    if (!user) {
-      navigate('/login');
-      return;
-    }
-
-    setBookingSubmitting(true);
-    setBookingErrorMsg(null);
-    setBookingSuccessMsg(null);
-
-    try {
-      await createWalkInBookingApi({
-        courtId: bookingCourt.court_id,
-        bookingDate: selectedDate,
-        startTime: bookingStartTime,
-        endTime: bookingEndTime,
-        customerName: user.fullName,
-        customerEmail: user.email,
-      });
-
-      setBookingSuccessMsg(
-        `Chúc mừng bạn đã đặt thành công sân "${bookingCourt.court_name}" ngày ${selectedDate} (${bookingStartTime} - ${bookingEndTime})!`
-      );
-      setTimeout(() => {
-        setBookingCourt(null);
-        setBookingSuccessMsg(null);
-      }, 2500);
-    } catch (err: unknown) {
-      const errorObj = err as { response?: { data?: { message?: string } }; message?: string };
-      setBookingErrorMsg(
-        errorObj.response?.data?.message ||
-          'Không thể hoàn tất đặt sân. Khung giờ này có thể đã kín hoặc xảy ra lỗi kết nối.'
-      );
-    } finally {
-      setBookingSubmitting(false);
-    }
+  // ── Chọn cơ sở từ cột trái → map sẽ fly đến vị trí đó ────────────────────
+  function handleSelectFacility(fac: FacilitySeed) {
+    setSelectedFacilityId(fac.facility_id);
   }
 
+  // ── JSX ───────────────────────────────────────────────────────────────────
   return (
     <div className="w-full flex flex-col min-h-screen">
-      {/* =========================================================================
-          1. HERO BANNER: NỀN XANH SẪM KẾT HỢP ẢNH nenHomePage.png TRONG THƯ MỤC PUBLIC
-          ========================================================================= */}
-      <section className="relative w-full overflow-hidden bg-gradient-to-r from-[#0a2756] via-[#0d3b7e] to-[#1457ba] text-white pt-10 pb-20 sm:pb-24 lg:pt-14 lg:pb-28">
-        {/* Nền ảnh nenHomePage.png được định vị ở phía bên phải có hiệu ứng góc bo và độ tương phản cao */}
-        <div className="absolute right-0 top-0 bottom-0 w-full lg:w-3/5 pointer-events-none select-none overflow-hidden opacity-35 lg:opacity-45 mix-blend-screen flex items-center justify-end">
+      {/* =====================================================================
+          1. HERO BANNER: NỀN ẢNH nenHomePage.png BAO PHỦ TOÀN BỘ
+          ===================================================================== */}
+      <section className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-2 w-full">
+        <div className="relative w-full overflow-hidden rounded-3xl min-h-[380px] sm:min-h-[430px] shadow-2xl border border-blue-900/40 flex flex-col justify-center">
+          {/* Ảnh nền nenHomePage.png bao phủ toàn diện */}
           <img
             src="/nenHomePage.png"
-            alt="SportLink Sports Illustration"
-            className="h-full w-full object-cover object-right filter brightness-110 contrast-125"
+            alt="SportLink Hero Sports Background"
+            className="absolute inset-0 w-full h-full object-cover object-right sm:object-center select-none"
           />
-        </div>
 
-        {/* Lớp phủ Gradient mềm mịn để chữ bên trái luôn hiển thị rõ ràng, sắc nét */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#0a2756] via-[#0a2756]/85 to-transparent pointer-events-none" />
+          {/* Lớp phủ gradient làm nổi bật chữ trắng bên trái */}
+          <div className="absolute inset-0 bg-gradient-to-r from-[#071a3d]/85 via-[#092657]/70 to-transparent sm:to-black/10 pointer-events-none" />
 
-        {/* Nội dung tiêu đề chính của Hero Banner */}
-        <div className="relative z-10 max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-2xl">
-            {/* Tag nhỏ ⚡ Ứng dụng quản lý sân thể thao */}
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 backdrop-blur-md text-amber-300 border border-white/10 mb-4 shadow-xs">
-              <span>⚡</span>
+          {/* Nội dung thông điệp chính */}
+          <div className="relative z-10 max-w-2xl p-7 sm:p-12 lg:p-14">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 backdrop-blur-md text-amber-300 border border-white/20 mb-4 shadow-xs">
               <span>Ứng dụng quản lý sân thể thao</span>
             </div>
 
-            {/* Tiêu đề chính lớn */}
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
-              Khám phá <span className="text-[#38bdf8] font-black">sân thể thao</span>.<br />
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight leading-tight drop-shadow-sm">
+              Khám phá <span className="text-[#38bdf8]">sân thể thao</span>.
+              <br />
               Định vị trực quan quanh bạn.
             </h1>
 
-            {/* Đoạn mô tả phụ */}
-            <p className="mt-3.5 text-sm sm:text-base lg:text-lg text-blue-100 font-normal leading-relaxed max-w-xl">
-              Dễ dàng tìm kiếm, đặt sân, quản lý sân bóng và tham gia cáp kèo cùng cộng đồng thể thao năng động.
+            <p className="mt-3.5 text-sm sm:text-base lg:text-lg text-blue-100 font-normal leading-relaxed max-w-xl drop-shadow-xs">
+              Dễ dàng tìm kiếm cụm sân, tra cứu các môn thể thao có trong từng
+              cơ sở và định vị trực quan trên bản đồ thực tế.
             </p>
+
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <Link
+                to="/courts"
+                className="px-5 py-2.5 rounded-xl bg-white text-blue-700 font-bold hover:bg-blue-50 transition shadow-md text-sm"
+              >
+                Khám phá sân bóng
+              </Link>
+              <Link
+                to="/matches"
+                className="px-5 py-2.5 rounded-xl bg-blue-500/30 hover:bg-blue-500/50 border border-white/30 text-white font-semibold transition backdrop-blur-md text-sm"
+              >
+                Cáp kèo ngay
+              </Link>
+            </div>
           </div>
         </div>
 
-        {/* =========================================================================
-            2. THANH TÌM KIẾM NỔI (FLOATING SEARCH BAR CHUẨN MOCKUP)
-            Gồm: Tìm tên sân/địa chỉ | Chọn môn thể thao | Chọn ngày | Nút Tìm kiếm
-            ========================================================================= */}
-        <div className="relative z-20 max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 -mb-32 sm:-mb-36 mt-8 sm:mt-12">
+        {/* ===================================================================
+            2. THANH TÌM KIẾM NỔI (SEARCH BAR NGAY DƯỚI HERO BANNER)
+            =================================================================== */}
+        <div className="relative z-20 max-w-5xl mx-auto -mt-7 sm:-mt-8 px-2">
           <form
-            onSubmit={handleSearch}
-            className="bg-white rounded-2xl md:rounded-full shadow-2xl border border-gray-100 p-2 sm:p-2.5 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-0 transition-all hover:shadow-blue-500/10"
+            onSubmit={handleSearchSubmit}
+            className="bg-white rounded-2xl md:rounded-full shadow-2xl border border-gray-100 p-2 sm:p-2.5 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-0 transition-all hover:shadow-blue-500/15"
           >
-            {/* Ô nhập 1: Tên sân, đường, khu vực */}
+            {/* Ô 1: Nhập Tên sân hoặc Địa chỉ */}
             <div className="flex-1 flex items-center gap-3 px-4 py-2 sm:py-2.5">
               <svg
-                className="w-5 h-5 text-gray-400 shrink-0"
+                className="w-5 h-5 text-gray-500 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -351,13 +715,13 @@ export default function PlayerHomePage() {
                 type="text"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
-                placeholder="Tìm tên sân, đường, khu vực..."
+                placeholder="Tìm tên cụm sân, đường, khu vực..."
                 className="w-full text-sm font-medium text-gray-800 placeholder-gray-400 bg-transparent focus:outline-none"
               />
               {keyword && (
                 <button
                   type="button"
-                  onClick={() => setKeyword('')}
+                  onClick={() => setKeyword("")}
                   className="text-gray-400 hover:text-gray-600 text-xs p-1"
                 >
                   ✕
@@ -365,83 +729,57 @@ export default function PlayerHomePage() {
               )}
             </div>
 
-            {/* Đường phân cách dọc 1 */}
             <div className="hidden md:block w-px h-8 bg-gray-200" />
 
-            {/* Ô chọn 2: Môn thể thao */}
-            <div className="flex items-center gap-2.5 px-4 py-2 sm:py-2.5 relative">
-              <svg
-                className="w-5 h-5 text-gray-400 shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                />
-                <path
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-              <select
-                value={selectedSportId}
-                onChange={(e) => setSelectedSportId(e.target.value)}
-                className="text-sm font-semibold text-gray-700 bg-transparent focus:outline-none cursor-pointer pr-4 appearance-none"
-              >
-                <option value="ALL">Tất cả môn thể thao</option>
-                {sportsList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <svg
-                className="w-4 h-4 text-gray-400 pointer-events-none -ml-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
+            {/* Ô 2: Chọn Thể loại Môn thể thao (Custom Dropdown cao cấp) */}
+            <div className="px-1 py-1">
+              <SportSelectDropdown
+                sportsList={sportsList}
+                selectedSportId={selectedSportId}
+                onSelectSport={(id) => setSelectedSportId(id)}
+              />
             </div>
 
-            {/* Đường phân cách dọc 2 */}
             <div className="hidden md:block w-px h-8 bg-gray-200" />
 
-            {/* Ô chọn 3: Ngày đặt */}
+            {/* Ô 3: Chọn ngày */}
             <div className="flex items-center gap-2.5 px-4 py-2 sm:py-2.5 relative">
               <svg
-                className="w-5 h-5 text-gray-400 shrink-0"
+                className="w-5 h-5 text-gray-700 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth="1.8" />
-                <path strokeWidth="1.8" strokeLinecap="round" d="M16 2v4M8 2v4M3 10h18" />
+                <rect
+                  x="3"
+                  y="4"
+                  width="18"
+                  height="18"
+                  rx="2"
+                  strokeWidth="1.8"
+                />
+                <path
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  d="M16 2v4M8 2v4M3 10h18"
+                />
               </svg>
               <input
                 type="date"
                 value={selectedDate}
-                min={new Date().toISOString().split('T')[0]}
+                min={new Date().toISOString().split("T")[0]}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="text-sm font-semibold text-gray-700 bg-transparent focus:outline-none cursor-pointer pr-2"
               />
             </div>
 
-            {/* Nút bấm 4: Tìm kiếm màu xanh dương nổi bật */}
+            {/* Nút Tìm kiếm */}
             <button
               type="submit"
-              disabled={loadingCourts}
-              className="bg-[#1d63ed] hover:bg-blue-700 text-white font-bold text-sm px-7 py-3 rounded-xl md:rounded-full flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 shrink-0"
+              className="bg-black hover:bg-gray-800 text-white font-bold text-sm px-7 py-3 rounded-xl md:rounded-full flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 shrink-0"
             >
               <svg
-                className="w-4 h-4"
+                className="w-4 h-4 text-white"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -453,436 +791,242 @@ export default function PlayerHomePage() {
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                 />
               </svg>
-              <span>{loadingCourts ? 'Đang tìm...' : 'Tìm kiếm'}</span>
+              <span>Tìm kiếm</span>
             </button>
           </form>
         </div>
       </section>
 
-      {/* =========================================================================
-          3. NỘI DUNG CHÍNH: 3 KHỐI GIAO DIỆN CHUẨN MOCKUP
-          Cột trái: Tính năng nổi bật | Cột giữa: Bản đồ trực quan | Cột phải: Sân bóng phổ biến
-          ========================================================================= */}
-      <section className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-20 sm:pt-24 pb-12 flex-1">
-        {/* Banner thông báo kết quả tìm kiếm nếu người dùng đã bấm Tìm kiếm */}
-        {hasSearched && (
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-blue-600 font-bold text-sm">
-                🔍 Kết quả tìm kiếm: Tìm thấy {courts.length} sân thể thao phù hợp
-              </span>
-              {keyword && (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white border border-blue-200 text-blue-700">
-                  Từ khóa: "{keyword}"
-                </span>
-              )}
-              {selectedSportId !== 'ALL' && (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white border border-blue-200 text-blue-700">
-                  Môn: {sportsList.find((s) => String(s.id) === selectedSportId)?.name}
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => {
-                setKeyword('');
-                setSelectedSportId('ALL');
-                setCourts(INITIAL_POPULAR_COURTS);
-                setHasSearched(false);
-              }}
-              className="text-xs text-blue-600 hover:underline font-semibold"
-            >
-              Đặt lại bộ lọc
-            </button>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          {/* -------------------------------------------------------------
-              CỘT 1 (Trái - 3.5 cols): TÍNH NĂNG NỔI BẬT (2x2 GRID)
-              ------------------------------------------------------------- */}
-          <div className="lg:col-span-4 bg-white rounded-2xl p-6 border border-gray-200/90 shadow-xs flex flex-col justify-between">
-            <div className="flex items-center gap-2 mb-5">
-              <span className="w-6 h-6 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold">
-                ★
-              </span>
-              <h2 className="text-base font-bold text-gray-900">Tính năng nổi bật</h2>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 flex-1">
-              {/* 1. Đặt sân nhanh chóng */}
-              <div className="bg-[#f8fafc] hover:bg-blue-50/60 p-4 rounded-xl border border-gray-100 transition-colors flex flex-col justify-between">
-                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center text-lg mb-3 shadow-xs">
-                  ⚡
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs sm:text-sm text-gray-900 leading-snug">
-                    Đặt sân nhanh chóng
-                  </h3>
-                  <p className="text-[11px] sm:text-xs text-gray-500 mt-1 leading-relaxed">
-                    Chỉ vài thao tác đơn giản
-                  </p>
-                </div>
-              </div>
-
-              {/* 2. Quản lý dễ dàng */}
-              <div className="bg-[#f8fafc] hover:bg-green-50/60 p-4 rounded-xl border border-gray-100 transition-colors flex flex-col justify-between">
-                <div className="w-10 h-10 rounded-xl bg-green-100 text-green-600 flex items-center justify-center text-lg mb-3 shadow-xs">
-                  📅
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs sm:text-sm text-gray-900 leading-snug">
-                    Quản lý dễ dàng
-                  </h3>
-                  <p className="text-[11px] sm:text-xs text-gray-500 mt-1 leading-relaxed">
-                    Lịch đặt sân trực quan
-                  </p>
-                </div>
-              </div>
-
-              {/* 3. Cáp kèo tiện lợi */}
-              <div className="bg-[#f8fafc] hover:bg-purple-50/60 p-4 rounded-xl border border-gray-100 transition-colors flex flex-col justify-between">
-                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center text-lg mb-3 shadow-xs">
-                  👥
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs sm:text-sm text-gray-900 leading-snug">
-                    Cáp kèo tiện lợi
-                  </h3>
-                  <p className="text-[11px] sm:text-xs text-gray-500 mt-1 leading-relaxed">
-                    Kết nối cùng người chơi
-                  </p>
-                </div>
-              </div>
-
-              {/* 4. An toàn & Tin cậy */}
-              <div className="bg-[#f8fafc] hover:bg-amber-50/60 p-4 rounded-xl border border-gray-100 transition-colors flex flex-col justify-between">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center text-lg mb-3 shadow-xs">
-                  🛡️
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs sm:text-sm text-gray-900 leading-snug">
-                    An toàn & Tin cậy
-                  </h3>
-                  <p className="text-[11px] sm:text-xs text-gray-500 mt-1 leading-relaxed">
-                    Thông tin minh bạch
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* -------------------------------------------------------------
-              CỘT 2 (Giữa - 4.5 cols): BẢN ĐỒ TRỰC QUAN ĐỊNH VỊ SÂN
-              ------------------------------------------------------------- */}
-          <div className="lg:col-span-4 bg-white rounded-2xl p-4 border border-gray-200/90 shadow-xs flex flex-col relative overflow-hidden">
-            {/* Nút Xem bản đồ nổi trên góc phải */}
-            <div className="flex items-center justify-between mb-3 z-10">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                Bản đồ khu vực
-              </span>
-              <Link
-                to="/courts"
-                className="bg-white/95 hover:bg-white text-blue-600 font-bold text-xs px-3.5 py-1.5 rounded-full shadow-md border border-gray-200 flex items-center gap-1.5 transition-all"
-              >
-                <span>📍</span>
-                <span>Xem bản đồ</span>
-              </Link>
-            </div>
-
-            {/* Không gian mô phỏng bản đồ tương tác với các Ghim sân bóng */}
-            <div className="relative flex-1 min-h-[280px] rounded-xl overflow-hidden bg-[#eaf2f8] border border-blue-100 select-none">
-              {/* Lưới đường sá & sông ngòi cách điệu */}
-              <svg className="absolute inset-0 w-full h-full opacity-60" xmlns="http://www.w3.org/2000/svg">
-                {/* Con sông Sài Gòn cách điệu */}
-                <path
-                  d="M-20,180 Q120,120 220,190 T450,140"
-                  fill="none"
-                  stroke="#93c5fd"
-                  strokeWidth="24"
-                  strokeLinecap="round"
-                />
-                {/* Các trục đại lộ chính */}
-                <line x1="0" y1="90" x2="500" y2="120" stroke="#fcd34d" strokeWidth="6" />
-                <line x1="180" y1="0" x2="260" y2="350" stroke="#fcd34d" strokeWidth="6" />
-                <line x1="60" y1="0" x2="380" y2="350" stroke="#cbd5e1" strokeWidth="4" />
-                <line x1="0" y1="260" x2="500" y2="220" stroke="#cbd5e1" strokeWidth="4" />
-                {/* Khu vực công viên / mảng xanh */}
-                <rect x="240" y="80" width="60" height="50" rx="8" fill="#dcfce7" />
-                <rect x="340" y="220" width="70" height="40" rx="8" fill="#dcfce7" />
-              </svg>
-
-              {/* Vị trí radar trung tâm của Người dùng */}
-              <div
-                className="absolute transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
-                style={{ left: '50%', top: '52%' }}
-              >
-                <div className="w-16 h-16 bg-blue-500/20 rounded-full animate-ping absolute" />
-                <div className="w-8 h-8 bg-blue-500/40 rounded-full flex items-center justify-center">
-                  <div className="w-3.5 h-3.5 bg-blue-600 rounded-full border-2 border-white shadow-md" />
-                </div>
-              </div>
-
-              {/* Các Pin sân bóng rải rác trên bản đồ */}
-              {MAP_PINS.map((pin) => {
-                const isSelected = activePin === pin.id;
-                return (
-                  <button
-                    key={pin.id}
-                    onClick={() => setActivePin(pin.id)}
-                    style={{ left: pin.x, top: pin.y }}
-                    className={`absolute transform -translate-x-1/2 -translate-y-1/2 group transition-transform ${
-                      isSelected ? 'scale-125 z-20' : 'hover:scale-110 z-10'
-                    }`}
-                  >
-                    {/* Icon bóng đá trong vòng tròn đen trắng */}
-                    <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 ${
-                        isSelected
-                          ? 'bg-blue-600 border-white text-white'
-                          : 'bg-[#0f172a] border-white text-white'
-                      }`}
-                    >
-                      <span className="text-xs">⚽</span>
-                    </div>
-
-                    {/* Tooltip hiển thị tên sân khi hover hoặc được chọn */}
-                    <div
-                      className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-gray-900 text-white text-[10px] font-bold rounded-md whitespace-nowrap shadow-md pointer-events-none transition-opacity ${
-                        isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      {pin.name} ({pin.area})
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Thông tin sân được chọn trên bản đồ */}
-            <div className="mt-3 flex items-center justify-between text-xs text-gray-600 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100">
-              <span className="font-semibold text-gray-800">
-                📍 {MAP_PINS.find((p) => p.id === activePin)?.name || 'Sân thể thao gần bạn'}
-              </span>
-              <span className="text-blue-600 font-bold">5 sân trong bán kính 3km</span>
-            </div>
-          </div>
-
-          {/* -------------------------------------------------------------
-              CỘT 3 (Phải - 4 cols): SÂN BÓNG PHỔ BIẾN (DANH SÁCH SÂN CHUẨN MOCKUP)
-              ------------------------------------------------------------- */}
-          <div className="lg:col-span-4 bg-white rounded-2xl p-6 border border-gray-200/90 shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-4">
+      {/* =======================================================================
+          3. BỐ CỤC 2 CỘT CHÍNH:
+          CỘT TRÁI (5 cols): DANH SÁCH 3 CƠ SỞ / TRANG
+          CỘT PHẢI (7 cols): BẢN ĐỒ LEAFLET THẬT
+          ======================================================================= */}
+      <section className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-14 flex-1">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* ─── CỘT TRÁI (5 cols): DANH SÁCH CƠ SỞ ─────────────────────────── */}
+          <div className="lg:col-span-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-200">
               <div className="flex items-center gap-2">
-                <span className="text-amber-500 text-lg font-bold">🏆</span>
-                <h2 className="text-base font-bold text-gray-900">Sân bóng phổ biến</h2>
+                <span className="w-2.5 h-2.5 rounded-full bg-black shrink-0" />
+                <h2 className="text-sm sm:text-base font-black text-gray-900 tracking-tight">
+                  Cơ sở Sân Thể Thao ({filteredFacilities.length} cơ sở)
+                </h2>
               </div>
-              <Link
-                to="/courts"
-                className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
-              >
-                <span>Xem tất cả</span>
-                <span>→</span>
-              </Link>
+              <span className="text-xs text-gray-500 font-medium">
+                3 cơ sở / trang
+              </span>
             </div>
 
-            {/* Danh sách 3 sân nổi bật */}
-            <div className="flex flex-col gap-3.5 flex-1">
-              {popularThreeCourts.map((court) => (
-                <div
-                  key={court.court_id}
-                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition border border-transparent hover:border-gray-100"
+            {filteredFacilities.length === 0 ? (
+              <div className="bg-white rounded-2xl p-8 border border-gray-200 text-center">
+                <p className="font-bold text-gray-800">
+                  Không tìm thấy cụm sân phù hợp
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Vui lòng thử tìm từ khóa khác hoặc xóa bộ lọc.
+                </p>
+                <button
+                  onClick={() => {
+                    setKeyword("");
+                    setSelectedSportId("ALL");
+                  }}
+                  className="mt-3 px-4 py-2 bg-black text-white text-xs font-bold rounded-xl"
                 >
-                  {/* Ảnh thu nhỏ của sân */}
-                  <img
-                    src={court.images}
-                    alt={court.court_name}
-                    className="w-16 h-14 rounded-lg object-cover shrink-0 shadow-xs border border-gray-100"
-                  />
+                  Xem toàn bộ cơ sở
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {paginatedFacilities.map((fac) => {
+                  const isSelected = selectedFacilityId === fac.facility_id;
 
-                  {/* Thông tin tên sân, địa điểm, sao đánh giá */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-xs sm:text-sm text-gray-900 truncate">
-                      {court.court_name}
-                    </h3>
-                    <p className="text-[11px] text-gray-500 truncate mt-0.5 flex items-center gap-1">
-                      <span>📍</span>
-                      <span>{court.address || court.facility_name}</span>
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className="text-amber-400 text-xs font-bold">★</span>
-                      <span className="text-[11px] font-bold text-gray-700">
-                        {court.rating || '4.8'}
-                      </span>
-                      <span className="text-[11px] text-gray-400">
-                        ({(court.rating_count || 1200).toLocaleString()} đánh giá)
-                      </span>
+                  return (
+                    <div
+                      key={fac.facility_id}
+                      onClick={() => handleSelectFacility(fac)}
+                      className={`bg-white rounded-2xl border p-3.5 sm:p-4 transition-all cursor-pointer relative overflow-hidden ${
+                        isSelected
+                          ? "border-black ring-2 ring-black/10 shadow-lg bg-gray-50/50"
+                          : "border-gray-200 hover:border-gray-400 hover:shadow-md"
+                      }`}
+                    >
+                      <div className="flex gap-3 sm:gap-3.5 items-start">
+                        {/* Ảnh thu nhỏ cơ sở */}
+                        <img
+                          src={getMediaUrl(fac.images)}
+                          alt={fac.name}
+                          onError={(e) => {
+                            e.currentTarget.src = "/nenHomePage.png";
+                          }}
+                          className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl object-cover shrink-0 border border-gray-100"
+                        />
+
+                        {/* Thông tin Cụm sân mẹ */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-1.5">
+                            <h3 className="font-extrabold text-xs sm:text-sm text-gray-900 leading-snug line-clamp-2">
+                              {fac.name}
+                            </h3>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 shrink-0">
+                              {fac.total_courts} sân
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-gray-500 mt-1 line-clamp-1">
+                            {fac.address}
+                          </p>
+
+                          {/* Chip môn thể thao (icon đen trắng + tên) */}
+                          <div className="mt-2 flex flex-wrap items-center gap-1">
+                            {fac.sports.slice(0, 4).map((sp) => (
+                              <span
+                                key={sp}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-900 text-white shadow-2xs"
+                              >
+                                <SportIconMono
+                                  name={sp}
+                                  className="w-2.5 h-2.5 text-white"
+                                />
+                                <span>{sp}</span>
+                              </span>
+                            ))}
+                            {fac.sports.length > 4 && (
+                              <span className="text-[10px] font-bold text-gray-500 px-1">
+                                +{fac.sports.length - 4}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Giá thuê và nút thao tác */}
+                          <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
+                            <div>
+                              <span className="text-[10px] text-gray-400 block leading-tight">
+                                Giá tham khảo
+                              </span>
+                              <span className="text-[11px] sm:text-xs font-black text-gray-900">
+                                {formatCurrency(fac.min_price || 120000)} -{" "}
+                                {formatCurrency(fac.max_price || 250000)}/h
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSelectFacility(fac);
+                                }}
+                                className="px-2.5 py-1 rounded-lg border border-gray-300 text-[11px] font-bold text-gray-700 hover:bg-gray-100 transition"
+                              >
+                                📍 Định vị
+                              </button>
+                              <Link
+                                to={`/facilities/${fac.facility_id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="px-2.5 py-1 rounded-lg bg-black hover:bg-gray-800 text-white text-[11px] font-bold transition shadow-xs"
+                              >
+                                Chi tiết →
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Phân trang */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-200 mt-2">
+                    <span className="text-xs text-gray-500 font-medium">
+                      Trang {currentPage} / {totalPages} (
+                      {filteredFacilities.length} cơ sở)
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={currentPage === 1}
+                        onClick={() =>
+                          setCurrentPage((p) => Math.max(p - 1, 1))
+                        }
+                        className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                      >
+                        ← Trước
+                      </button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                        (page) => (
+                          <button
+                            key={page}
+                            type="button"
+                            onClick={() => setCurrentPage(page)}
+                            className={`w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center ${
+                              currentPage === page
+                                ? "bg-black text-white shadow-xs"
+                                : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        ),
+                      )}
+                      <button
+                        type="button"
+                        disabled={currentPage === totalPages}
+                        onClick={() =>
+                          setCurrentPage((p) => Math.min(p + 1, totalPages))
+                        }
+                        className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                      >
+                        Sau →
+                      </button>
                     </div>
                   </div>
+                )}
+              </div>
+            )}
+          </div>
 
-                  {/* Nút Đặt ngay màu xanh tròn trịa theo mockup */}
-                  <button
-                    onClick={() => setBookingCourt(court)}
-                    className="bg-[#1d63ed] hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-full transition-all shrink-0 shadow-xs active:scale-95"
-                  >
-                    Đặt ngay
-                  </button>
-                </div>
-              ))}
+          {/* ─── CỘT PHẢI (7 cols): BẢN ĐỒ LEAFLET THẬT ─────────────────────── */}
+          <div className="lg:col-span-7 sticky top-20">
+            <div className="bg-white rounded-2xl border border-gray-200/90 shadow-md p-4">
+              <SportLinkMap
+                facilities={filteredFacilities}
+                selectedFacilityId={selectedFacilityId}
+                onSelectFacility={(id) => {
+                  setSelectedFacilityId(id);
+                }}
+              />
             </div>
           </div>
         </div>
       </section>
 
-      {/* =========================================================================
-          4. FOOTER BANNER: KẾT NỐI ĐAM MÊ THỂ THAO, XÂY DỰNG CỘNG ĐỒNG VỮNG MẠNH
-          ========================================================================= */}
-      <footer className="w-full bg-[#f1f5f9] border-t border-gray-200 mt-auto py-4">
+      {/* =======================================================================
+          4. THANH THÔNG ĐIỆP CỘNG ĐỒNG
+          ======================================================================= */}
+      <div className="w-full bg-blue-50/80 border-t border-blue-100/80 py-3 mt-auto">
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">
-              👥
-            </span>
             <span className="font-bold text-gray-800">SportLink</span>
             <span>–</span>
-            <span>Kết nối đam mê thể thao, xây dựng cộng đồng vững mạnh!</span>
+            <span className="text-gray-700 font-medium">
+              Kết nối đam mê thể thao, xây dựng cộng đồng vững mạnh!
+            </span>
           </div>
 
           <div className="flex items-center gap-4 text-gray-500">
-            <span>© 2026 SportLink Platform</span>
+            <span>Cụm sân chuẩn thi đấu</span>
             <span>•</span>
-            <Link to="/courts" className="hover:text-blue-600">
-              Danh sách sân
-            </Link>
-            <span>•</span>
-            <Link to="/matches" className="hover:text-blue-600">
-              Cáp kèo
+            <Link
+              to="/courts"
+              className="text-blue-600 hover:underline font-semibold"
+            >
+              Xem tất cả sân →
             </Link>
           </div>
         </div>
-      </footer>
-
-      {/* =========================================================================
-          5. MODAL ĐẶT SÂN NHANH KHI BẤM NÚT "ĐẶT NGAY"
-          ========================================================================= */}
-      {bookingCourt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <div>
-                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">
-                  Đặt sân trực tuyến
-                </span>
-                <h3 className="text-lg font-bold text-gray-900 mt-0.5">
-                  {bookingCourt.court_name}
-                </h3>
-              </div>
-              <button
-                onClick={() => setBookingCourt(null)}
-                className="text-gray-400 hover:text-gray-600 text-lg p-1 rounded-full hover:bg-gray-100"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3.5 text-sm">
-              <div className="bg-gray-50 p-3 rounded-xl flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-500">Môn thể thao</p>
-                  <p className="font-bold text-gray-800">{bookingCourt.sport_name || 'Bóng đá'}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">Mức giá tham khảo</p>
-                  <p className="font-bold text-blue-600">
-                    {formatCurrency(bookingCourt.price_per_hour || 200000)}/h
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Ngày đặt sân
-                </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Giờ bắt đầu
-                  </label>
-                  <select
-                    value={bookingStartTime}
-                    onChange={(e) => setBookingStartTime(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    {['06:00', '07:30', '09:00', '15:00', '16:30', '17:00', '18:00', '19:30', '20:00'].map(
-                      (t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Giờ kết thúc
-                  </label>
-                  <select
-                    value={bookingEndTime}
-                    onChange={(e) => setBookingEndTime(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    {['07:30', '09:00', '10:30', '16:30', '18:00', '18:30', '19:30', '21:00', '21:30'].map(
-                      (t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              {bookingErrorMsg && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs font-medium">
-                  ⚠️ {bookingErrorMsg}
-                </div>
-              )}
-
-              {bookingSuccessMsg && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-700 text-xs font-medium">
-                  ✓ {bookingSuccessMsg}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
-              <button
-                type="button"
-                onClick={() => setBookingCourt(null)}
-                className="px-4 py-2 rounded-lg text-xs font-bold text-gray-600 hover:bg-gray-100 transition"
-              >
-                Hủy bỏ
-              </button>
-              <button
-                type="button"
-                disabled={bookingSubmitting}
-                onClick={handleConfirmQuickBooking}
-                className="px-5 py-2.5 rounded-lg text-xs font-bold bg-[#1d63ed] text-white hover:bg-blue-700 transition shadow-md active:scale-95 disabled:opacity-50"
-              >
-                {bookingSubmitting ? 'Đang xử lý...' : 'Xác nhận đặt sân'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

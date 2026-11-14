@@ -6,6 +6,13 @@ import {
   type User,
   type UserRole,
 } from "../../shared/stores/authStore";
+import {
+  initializeGoogleAuth,
+  registerGoogleCallback,
+  renderGoogleButton,
+  promptGoogleSignIn,
+  type GoogleCredentialResponse,
+} from "../../shared/lib/googleAuth";
 
 const GOOGLE_CLIENT_ID =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ||
@@ -30,19 +37,22 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, user]);
 
-  // Khởi tạo Google Identity Services (GSI)
+  // Khởi tạo Google Identity Services (GSI) tập trung, an toàn với StrictMode
   useEffect(() => {
-    function initGoogleSignIn() {
-      const google = (window as unknown as { google?: any })?.google;
-      if (google?.accounts?.id) {
-        google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: handleGoogleResponse,
-          auto_select: false,
-        });
+    let isMounted = true;
 
-        if (googleBtnContainerRef.current) {
-          google.accounts.id.renderButton(googleBtnContainerRef.current, {
+    // Đăng ký callback xử lý kết quả đăng nhập cho component
+    const unregister = registerGoogleCallback((response) => {
+      if (isMounted) {
+        handleGoogleResponse(response);
+      }
+    });
+
+    // Khởi tạo GIS duy nhất 1 lần và render nút đăng nhập
+    initializeGoogleAuth(GOOGLE_CLIENT_ID)
+      .then(() => {
+        if (isMounted && googleBtnContainerRef.current) {
+          renderGoogleButton(googleBtnContainerRef.current, {
             theme: "outline",
             size: "large",
             width: googleBtnContainerRef.current.clientWidth || 360,
@@ -51,26 +61,21 @@ export default function LoginPage() {
             logo_alignment: "center",
           });
         }
-      }
-    }
+      })
+      .catch((err) => {
+        console.warn("Không thể tải Google Identity Services:", err);
+      });
 
-    if ((window as unknown as { google?: any })?.google?.accounts?.id) {
-      initGoogleSignIn();
-    } else {
-      const interval = setInterval(() => {
-        if ((window as unknown as { google?: any })?.google?.accounts?.id) {
-          clearInterval(interval);
-          initGoogleSignIn();
-        }
-      }, 300);
-      return () => clearInterval(interval);
-    }
+    return () => {
+      isMounted = false;
+      unregister();
+    };
   }, []);
 
   /**
    * Xử lý kết quả trả về từ Google Identity Services
    */
-  async function handleGoogleResponse(response: { credential?: string }) {
+  async function handleGoogleResponse(response: GoogleCredentialResponse) {
     if (!response || !response.credential) return;
 
     setLoading(true);
@@ -118,9 +123,6 @@ export default function LoginPage() {
    */
   function redirectByRole(role: UserRole) {
     switch (role) {
-      case "admin":
-        navigate("/admin", { replace: true });
-        break;
       case "owner":
         navigate("/owner", { replace: true });
         break;
@@ -587,12 +589,10 @@ export default function LoginPage() {
               {/* Fallback & Custom styled Google button */}
               <button
                 type="button"
-                onClick={() => {
-                  const google = (window as unknown as { google?: any })
-                    ?.google;
-                  if (google?.accounts?.id) {
-                    google.accounts.id.prompt();
-                  } else {
+                onClick={async () => {
+                  try {
+                    await promptGoogleSignIn();
+                  } catch {
                     setErrorMessage(
                       "Đang kết nối dịch vụ Google... Vui lòng thử lại sau vài giây.",
                     );

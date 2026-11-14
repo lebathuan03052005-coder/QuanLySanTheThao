@@ -13,6 +13,7 @@ export interface CourtItem {
   price_per_hour: number;
   address?: string;
   description?: string;
+  utilities?: string;
   capacity?: number;
   images?: string;
   status: string;
@@ -20,7 +21,7 @@ export interface CourtItem {
   rating_count?: number;
 }
 
-// Giữ tương thích ngược với interface Court cũ
+// Tương thích ngược với interface Court cũ nếu có component khác dùng
 export interface Court {
   id: number;
   ownerId: number;

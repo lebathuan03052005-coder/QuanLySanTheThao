@@ -95,11 +95,6 @@ export async function runSprint2Seed() {
   await pool.request()
     .input('pwd', DEFAULT_PASSWORD_HASH)
     .query(`
-      IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'admin@sportlink.vn')
-      BEGIN
-        INSERT INTO [dbo].[users] ([full_name], [phone], [email], [password_hash], [role], [reputation_score], [status], [created_at])
-        VALUES (N'Quản Trị Viên Hệ Thống (Admin)', '0900000001', 'admin@sportlink.vn', @pwd, 'ADMIN', 5.0, 'ACTIVE', GETDATE());
-      END
 
       IF NOT EXISTS (SELECT 1 FROM [dbo].[users] WHERE [email] = 'owner@sportlink.vn')
       BEGIN
@@ -331,6 +326,21 @@ export async function runSprint2Seed() {
     for (const item of o3Courts) {
       await insertCourtIfNotExists(pool, owner3Id, item);
     }
+
+    // Cập nhật tọa độ GPS và đường dẫn ảnh đại diện cho các cơ sở sân mẹ
+    try {
+      await pool.request().query(`
+        IF COL_LENGTH('dbo.facilities', 'lat') IS NOT NULL
+        BEGIN
+          UPDATE [dbo].[facilities] SET [lat] = 10.8495, [lng] = 106.7905, [images] = '/facilities/man-thien/thumb.jpg' WHERE [name] LIKE N'%Man Thiện%';
+          UPDATE [dbo].[facilities] SET [lat] = 10.8490, [lng] = 106.7770, [images] = '/facilities/hiep-phu/thumb.jpg' WHERE [name] LIKE N'%Hiệp Phú%';
+          UPDATE [dbo].[facilities] SET [lat] = 10.8540, [lng] = 106.7980, [images] = '/facilities/shtp/thumb.jpg' WHERE [name] LIKE N'%SHTP%';
+          UPDATE [dbo].[facilities] SET [lat] = 10.8510, [lng] = 106.7620, [images] = '/facilities/dang-van-bi/thumb.jpg' WHERE [name] LIKE N'%Đặng Văn Bi%';
+          UPDATE [dbo].[facilities] SET [lat] = 10.8750, [lng] = 106.8020, [images] = '/facilities/lang-dai-hoc-a/thumb.jpg' WHERE [name] LIKE N'%Khu A%';
+          UPDATE [dbo].[facilities] SET [lat] = 10.8820, [lng] = 106.7820, [images] = '/facilities/lang-dai-hoc-b/thumb.jpg' WHERE [name] LIKE N'%Khu B%';
+        END
+      `);
+    } catch {}
   }
 
   // 6. Seed bảng giá động (court_prices), khách hàng (customers), đơn đặt sân (bookings) và giao dịch (transactions) mẫu cho Owner 1 (IF NOT EXISTS)

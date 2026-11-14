@@ -1,9 +1,10 @@
 import { Outlet } from 'react-router';
 import PlayerNavbar from '../components/PlayerNavbar';
+import PlayerFooter from '../components/PlayerFooter';
 
 /**
  * Layout chính dành cho Người chơi (Player) & Người dùng cuối.
- * Tích hợp Header/Navbar chuẩn theo thiết kế SportLink mockup.
+ * Tích hợp Header/Navbar và Footer chuẩn theo thiết kế SportLink.
  */
 export default function PlayerLayout() {
   return (
@@ -15,6 +16,9 @@ export default function PlayerLayout() {
       <main className="flex-1 w-full">
         <Outlet />
       </main>
+
+      {/* Chân trang Footer hoàn chỉnh & chuyên nghiệp */}
+      <PlayerFooter />
     </div>
   );
 }

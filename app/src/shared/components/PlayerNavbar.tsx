@@ -11,9 +11,22 @@ export default function PlayerNavbar() {
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(1);
+  const [avatarError, setAvatarError] = useState(false);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notifMenuRef = useRef<HTMLDivElement>(null);
+
+  // Chuyển đổi đường dẫn ảnh avatar tương đối (/uploads/...) thành URL backend đầy đủ (cổng 3000)
+  function getAvatarUrl(url?: string | null): string {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    const backendBase = (
+      import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
+    ).replace(/\/api\/?$/, '');
+    return `${backendBase}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
 
   // Đóng dropdown khi click ra ngoài
   useEffect(() => {
@@ -221,52 +234,84 @@ export default function PlayerNavbar() {
               )}
             </div>
 
-            {/* Avatar Người dùng (chữ 'L' nền xanh navy sẫm) kèm icon mũi tên xổ xuống */}
-            <div className="relative" ref={userMenuRef}>
-              <button
-                onClick={() => {
-                  setShowUserMenu(!showUserMenu);
-                  setShowNotificationMenu(false);
-                }}
-                className="flex items-center gap-1.5 p-1 rounded-full hover:bg-gray-100 transition-colors focus:outline-none"
-              >
-                {user?.avatarUrl ? (
-                  <img
-                    src={user.avatarUrl}
-                    alt={user.fullName || 'User'}
-                    className="w-9 h-9 rounded-full object-cover border border-gray-200"
-                  />
-                ) : (
-                  <div className="w-9 h-9 rounded-full bg-[#0c2f68] text-white font-bold flex items-center justify-center text-sm shadow-xs">
-                    {userInitial}
-                  </div>
-                )}
-                <svg
-                  className={`w-3.5 h-3.5 text-gray-500 transition-transform duration-200 ${
-                    showUserMenu ? 'rotate-180' : ''
-                  }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+            {/* Khu vực Tài khoản / Avatar */}
+            {!user ? (
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/login"
+                  className="px-3.5 py-1.5 text-xs font-bold text-gray-700 hover:text-black hover:bg-gray-100 rounded-xl transition"
                 >
-                  <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+                  Đăng nhập
+                </Link>
+                <Link
+                  to="/login"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-black text-white hover:bg-gray-800 rounded-xl transition shadow-xs"
+                >
+                  Đăng ký
+                </Link>
+              </div>
+            ) : (
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  onClick={() => {
+                    setShowUserMenu(!showUserMenu);
+                    setShowNotificationMenu(false);
+                  }}
+                  className="flex items-center gap-1.5 p-1 rounded-full hover:bg-gray-100 transition-colors focus:outline-none cursor-pointer"
+                  title={user.fullName || "Tài khoản của tôi"}
+                >
+                  {user.avatarUrl && !avatarError ? (
+                    <img
+                      src={getAvatarUrl(user.avatarUrl)}
+                      alt={user.fullName || 'User'}
+                      onError={() => setAvatarError(true)}
+                      className="w-9 h-9 rounded-full object-cover border border-gray-200 shadow-2xs"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-[#0c2f68] text-white font-bold flex items-center justify-center text-sm shadow-xs">
+                      {userInitial}
+                    </div>
+                  )}
+                  <svg
+                    className={`w-3.5 h-3.5 text-gray-500 transition-transform duration-200 ${
+                      showUserMenu ? 'rotate-180' : ''
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
 
-              {/* Dropdown Menu Tài khoản Người chơi */}
-              {showUserMenu && (
-                <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
-                  <div className="px-4 py-2.5 border-b border-gray-100">
-                    <p className="text-sm font-bold text-gray-900 truncate">
-                      {user?.fullName || 'Người chơi SportLink'}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">
-                      {user?.email || 'player@sportlink.vn'}
-                    </p>
-                    <span className="inline-block mt-2 px-2 py-0.5 text-[11px] font-semibold rounded-full bg-blue-100 text-blue-700">
-                      {user?.role?.toUpperCase() || 'PLAYER'}
-                    </span>
-                  </div>
+                {/* Dropdown Menu Tài khoản Người chơi */}
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in duration-100">
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+                      {user.avatarUrl && !avatarError ? (
+                        <img
+                          src={getAvatarUrl(user.avatarUrl)}
+                          alt={user.fullName || 'User'}
+                          onError={() => setAvatarError(true)}
+                          className="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0 shadow-2xs"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-[#0c2f68] text-white font-bold flex items-center justify-center text-base shrink-0 shadow-xs">
+                          {userInitial}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-gray-900 truncate">
+                          {user.fullName || 'Người chơi SportLink'}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate mt-0.5">
+                          {user.email || 'player@sportlink.vn'}
+                        </p>
+                        <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-full bg-blue-100 text-blue-700">
+                          {user.role?.toUpperCase() || 'PLAYER'}
+                        </span>
+                      </div>
+                    </div>
 
                   <div className="py-1">
                     <Link
@@ -295,8 +340,8 @@ export default function PlayerNavbar() {
                       Kèo thể thao đã tham gia
                     </Link>
 
-                    {/* Lối tắt quản trị nếu tài khoản có quyền Owner hoặc Admin */}
-                    {['owner', 'admin'].includes((user?.role || '').toLowerCase()) && (
+                    {/* Lối tắt quản trị nếu tài khoản có quyền Owner */}
+                    {(user?.role || '').toLowerCase() === 'owner' && (
                       <Link
                         to="/owner/bookings"
                         className="flex items-center gap-2 px-4 py-2 text-sm text-purple-700 hover:bg-purple-50 transition-colors font-medium"
@@ -324,6 +369,7 @@ export default function PlayerNavbar() {
                 </div>
               )}
             </div>
+          )}
 
             {/* Nút Hamburger menu trên thiết bị di động */}
             <div className="md:hidden">
