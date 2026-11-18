@@ -33,9 +33,19 @@ export async function getAllCourts(filters = {}) {
     request.input('facilityId', parseInt(filters.facility_id));
     query += ' AND c.facility_id = @facilityId';
   }
-  if (filters.sport_id !== undefined && filters.sport_id !== '') {
+  if (filters.sport_id !== undefined && filters.sport_id !== '' && filters.sport_id !== 'ALL') {
     request.input('sportId', parseInt(filters.sport_id));
     query += ' AND c.sport_id = @sportId';
+  }
+  if (filters.keyword !== undefined && filters.keyword !== null && String(filters.keyword).trim() !== '') {
+    request.input('keyword', `%${String(filters.keyword).trim()}%`);
+    query += ` AND (
+      c.court_name LIKE @keyword 
+      OR c.address LIKE @keyword 
+      OR f.name LIKE @keyword 
+      OR f.address LIKE @keyword 
+      OR s.sport_name LIKE @keyword
+    )`;
   }
 
   query += ' ORDER BY c.facility_id ASC, c.court_id ASC';

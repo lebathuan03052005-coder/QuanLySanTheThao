@@ -32,7 +32,7 @@ export async function runSprint2Migration() {
       );
     END
 
-    -- Đồng bộ ràng buộc role cho [users] (hỗ trợ đầy đủ ADMIN, OWNER, STAFF, PLAYER cả hoa lẫn thường)
+    -- Đồng bộ ràng buộc role cho [users] (chỉ OWNER, STAFF, PLAYER cả hoa lẫn thường)
     DECLARE @userRoleChk NVARCHAR(256) = (
       SELECT TOP 1 name FROM sys.check_constraints 
       WHERE parent_object_id = OBJECT_ID('dbo.users')
@@ -42,8 +42,9 @@ export async function runSprint2Migration() {
     BEGIN
       EXEC('ALTER TABLE [dbo].[users] DROP CONSTRAINT [' + @userRoleChk + ']');
     END
+    UPDATE [dbo].[users] SET [role] = 'OWNER' WHERE UPPER([role]) = 'ADMIN';
     ALTER TABLE [dbo].[users] WITH CHECK ADD CONSTRAINT [chk_users_role] 
-      CHECK ([role] IN ('PLAYER', 'STAFF', 'OWNER', 'ADMIN', 'player', 'staff', 'owner', 'admin'));
+      CHECK ([role] IN ('PLAYER', 'STAFF', 'OWNER', 'player', 'staff', 'owner'));
   `);
 
   // 1. Đồng bộ các cột mở rộng của bảng [users] và bảng [court_staff]
@@ -97,6 +98,20 @@ export async function runSprint2Migration() {
         [updated_at] DATETIME DEFAULT GETDATE(),
         CONSTRAINT [fk_facilities_owner] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id])
       );
+    END
+
+    -- Đảm bảo bảng facilities có các cột lat, lng, images cho bản đồ và hiển thị
+    IF COL_LENGTH('dbo.facilities', 'lat') IS NULL
+    BEGIN
+      ALTER TABLE [dbo].[facilities] ADD [lat] FLOAT NULL, [lng] FLOAT NULL;
+    END
+    IF COL_LENGTH('dbo.facilities', 'images') IS NULL
+    BEGIN
+      ALTER TABLE [dbo].[facilities] ADD [images] NVARCHAR(MAX) NULL;
+    END
+    ELSE
+    BEGIN
+      ALTER TABLE [dbo].[facilities] ALTER COLUMN [images] NVARCHAR(MAX);
     END
   `);
 
@@ -308,6 +323,107 @@ export async function runSprint2Migration() {
       )
       BEGIN
         ALTER TABLE [dbo].[transactions] ALTER COLUMN [user_id] INT NULL;
+      END
+    END
+
+    -- 6. Mở rộng Schema Sprint 3 (S3-07, S3-08, S3-09, S3-10): Concurrency Index, Payment Sandbox, VietQR & Refund
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'notifications')
+    BEGIN
+      CREATE TABLE [dbo].[notifications] (
+        [notification_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        [user_id] INT NOT NULL,
+        [title] NVARCHAR(200) NOT NULL,
+        [content] NVARCHAR(500) NOT NULL,
+        [is_read] BIT NULL DEFAULT 0,
+        [created_at] DATETIME DEFAULT GETDATE()
+      );
+    END
+
+    IF EXISTS (SELECT * FROM sys.tables WHERE name = 'bookings')
+    BEGIN
+      IF COL_LENGTH('dbo.bookings', 'payment_status') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [payment_status] VARCHAR(30) NOT NULL DEFAULT 'UNPAID';
+      END
+
+      IF COL_LENGTH('dbo.bookings', 'payment_method') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [payment_method] VARCHAR(50) NULL;
+      END
+
+      IF COL_LENGTH('dbo.bookings', 'cancel_reason') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [cancel_reason] NVARCHAR(500) NULL;
+      END
+
+      IF COL_LENGTH('dbo.bookings', 'cancelled_at') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [cancelled_at] DATETIME NULL;
+      END
+
+      IF COL_LENGTH('dbo.bookings', 'refund_amount') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [refund_amount] DECIMAL(18,2) NOT NULL DEFAULT 0;
+      END
+
+      IF COL_LENGTH('dbo.bookings', 'updated_at') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [updated_at] DATETIME NULL DEFAULT GETDATE();
+      END
+
+      IF NOT EXISTS (
+        SELECT * FROM sys.indexes
+        WHERE name = 'IX_bookings_court_date_concurrency'
+          AND object_id = OBJECT_ID(N'[dbo].[bookings]')
+      )
+      BEGIN
+        CREATE NONCLUSTERED INDEX [IX_bookings_court_date_concurrency]
+        ON [dbo].[bookings] ([court_id] ASC, [booking_date] ASC, [start_time] ASC, [end_time] ASC)
+        INCLUDE ([status]);
+      END
+    END
+
+    IF EXISTS (SELECT * FROM sys.tables WHERE name = 'transactions')
+    BEGIN
+      IF COL_LENGTH('dbo.transactions', 'order_code') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[transactions] ADD [order_code] VARCHAR(100) NULL;
+      END
+
+      IF COL_LENGTH('dbo.transactions', 'gateway_trans_id') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[transactions] ADD [gateway_trans_id] VARCHAR(100) NULL;
+      END
+
+      IF COL_LENGTH('dbo.transactions', 'signature') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[transactions] ADD [signature] VARCHAR(255) NULL;
+      END
+
+      IF COL_LENGTH('dbo.transactions', 'raw_payload') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[transactions] ADD [raw_payload] NVARCHAR(MAX) NULL;
+      END
+
+      IF COL_LENGTH('dbo.transactions', 'note') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[transactions] ADD [note] NVARCHAR(500) NULL;
+      END
+
+      IF COL_LENGTH('dbo.transactions', 'updated_at') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[transactions] ADD [updated_at] DATETIME NULL DEFAULT GETDATE();
+      END
+
+      -- Gỡ bỏ check constraint cũ trên transactions nếu gây chặn VIETQR / PENDING / FAILED
+      DECLARE @txChkSql NVARCHAR(MAX) = N'';
+      SELECT @txChkSql = @txChkSql + N'ALTER TABLE [dbo].[transactions] DROP CONSTRAINT [' + name + N'];'
+      FROM sys.check_constraints
+      WHERE parent_object_id = OBJECT_ID('dbo.transactions');
+
+      IF LEN(@txChkSql) > 0
+      BEGIN
+        EXEC sp_executesql @txChkSql;
       END
     END
   `);

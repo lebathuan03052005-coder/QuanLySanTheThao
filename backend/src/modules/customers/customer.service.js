@@ -224,11 +224,8 @@ export async function getCustomerHistory(user, customerId) {
     ORDER BY b.booking_date DESC, b.start_time DESC
   `);
 
-  // Chống IDOR: nếu không phải admin và khách không có bất kỳ đơn nào trong phạm vi sân của Owner/Staff
-  if (
-    (user.role || '').toLowerCase() !== 'admin' &&
-    bookingsRes.recordset.length === 0
-  ) {
+  // Chống IDOR: khách không có bất kỳ đơn nào trong phạm vi sân của Owner/Staff
+  if (bookingsRes.recordset.length === 0) {
     throw new AppError(
       'Khách hàng này không có lịch sử đặt sân tại cơ sở của bạn.',
       404

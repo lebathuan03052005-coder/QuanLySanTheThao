@@ -180,7 +180,7 @@ export async function getSportById(sportId, ownerId = null) {
 
 /**
  * Thêm mới một loại môn thể thao.
- * - Khi Owner tạo môn mới, gắn `owner_id = user.id` để chỉ Owner đó (và Admin) quản lý, không làm nhiễu danh mục của Owner khác.
+ * - Khi Owner tạo môn mới, gắn `owner_id = user.id` để chỉ Owner đó quản lý, không làm nhiễu danh mục của Owner khác.
  * @param {{ sportName: string, description?: string }} data
  * @param {{ id?: number, role?: string }} [user]
  */
@@ -244,13 +244,12 @@ export async function createSport(data, user = null) {
 export async function updateSport(sportId, data, user = null) {
   const { sportName, description } = data;
   const ownerId = user?.id !== undefined && user?.id !== null ? Number(user.id) : null;
-  const isAdmin = (user?.role || '').toLowerCase() === 'admin';
   const pool = await getPool();
 
   const rawSport = await getSportById(sportId);
 
   if (rawSport.owner_id !== null && rawSport.owner_id !== undefined) {
-    if (ownerId !== null && !isAdmin && Number(rawSport.owner_id) !== ownerId) {
+    if (ownerId !== null && Number(rawSport.owner_id) !== ownerId) {
       throw new AppError('Bạn không có quyền chỉnh sửa môn thể thao của chủ sân khác.', 403);
     }
   }
@@ -280,7 +279,7 @@ export async function updateSport(sportId, data, user = null) {
   }
 
   // Nếu là môn chung (owner_id IS NULL) và có thông tin Owner đang đăng nhập -> Lưu riêng vào bảng owner_sports
-  if ((rawSport.owner_id === null || rawSport.owner_id === undefined) && ownerId !== null && !isAdmin) {
+  if ((rawSport.owner_id === null || rawSport.owner_id === undefined) && ownerId !== null) {
     await pool.request()
       .input('ownerId', ownerId)
       .input('sportId', sportId)
@@ -305,7 +304,7 @@ export async function updateSport(sportId, data, user = null) {
     return await getSportById(sportId, ownerId);
   }
 
-  // Trường hợp môn riêng của Owner hoặc gọi từ Admin / Unit test không truyền user
+  // Trường hợp môn riêng của Owner hoặc gọi từ Unit test không truyền user
   await pool.request()
     .input('id', sportId)
     .input('sportName', sportName ? sportName.trim() : null)
@@ -337,18 +336,17 @@ export async function updateSportStatus(sportId, status, user = null) {
   }
 
   const ownerId = user?.id !== undefined && user?.id !== null ? Number(user.id) : null;
-  const isAdmin = (user?.role || '').toLowerCase() === 'admin';
   const rawSport = await getSportById(sportId);
 
   if (rawSport.owner_id !== null && rawSport.owner_id !== undefined) {
-    if (ownerId !== null && !isAdmin && Number(rawSport.owner_id) !== ownerId) {
+    if (ownerId !== null && Number(rawSport.owner_id) !== ownerId) {
       throw new AppError('Bạn không có quyền thay đổi trạng thái môn thể thao của chủ sân khác.', 403);
     }
   }
 
   const pool = await getPool();
 
-  if ((rawSport.owner_id === null || rawSport.owner_id === undefined) && ownerId !== null && !isAdmin) {
+  if ((rawSport.owner_id === null || rawSport.owner_id === undefined) && ownerId !== null) {
     await pool.request()
       .input('ownerId', ownerId)
       .input('sportId', sportId)

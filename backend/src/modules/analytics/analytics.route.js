@@ -11,8 +11,8 @@ import {
 
 const router = Router();
 
-// Phân quyền RBAC nghiêm ngặt (TC04): Chỉ OWNER và ADMIN được xem báo cáo doanh thu & tỷ lệ lấp đầy
-router.use(verifyToken, checkAccountStatus, authorize('owner', 'admin'));
+// Phân quyền RBAC nghiêm ngặt (TC04): Chỉ OWNER được xem báo cáo doanh thu & tỷ lệ lấp đầy
+router.use(verifyToken, checkAccountStatus, authorize('owner'));
 
 router.get('/revenue', getRevenueDashboard);
 router.get('/occupancy', getOccupancyAnalytics);
