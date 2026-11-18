@@ -5,6 +5,7 @@ import OwnerLayout from "./shared/layouts/OwnerLayout";
 import PlayerHomePage from "./features/home/PlayerHomePage";
 import CourtListPage from "./features/courts/CourtListPage";
 import FacilityDetailPage from "./features/facilities/FacilityDetailPage";
+import PlayerBookingsPage from "./features/booking/PlayerBookingsPage";
 import MatchListPage from "./features/matches/MatchListPage";
 import StaffManagementPage from "./features/staff/StaffManagementPage";
 import FacilityManagementPage from "./features/facilities/FacilityManagementPage";
@@ -48,7 +49,7 @@ export default function App() {
           <Route index element={<PlayerHomePage />} />
           <Route path="facilities/:id" element={<FacilityDetailPage />} />
           <Route path="courts" element={<CourtListPage />} />
-          <Route path="bookings" element={<div className="p-8 text-center text-gray-500">Khu vực lịch đặt sân của tôi</div>} />
+          <Route path="bookings" element={<PlayerBookingsPage />} />
           <Route path="matches" element={<MatchListPage />} />
           <Route path="news" element={<div className="p-8 text-center text-gray-500">Khu vực tin tức thể thao SportLink</div>} />
         </Route>

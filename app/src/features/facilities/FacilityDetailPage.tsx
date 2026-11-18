@@ -12,7 +12,14 @@ import {
 } from "./facility.api";
 import { fetchCourts, type CourtItem } from "../courts/court.api";
 import { formatCurrency } from "../../shared/utils/format";
-import { createWalkInBookingApi } from "../booking/booking.api";
+import {
+  createWalkInBookingApi,
+  getCourtAvailabilityApi,
+  getBookingQuoteApi,
+  type CourtAvailabilityResponse,
+  type BookingQuoteResponse,
+} from "../booking/booking.api";
+import PaymentSandboxModal from "../booking/PaymentSandboxModal";
 import { useAuthStore } from "../../shared/stores/authStore";
 import { SportIconMono } from "../home/PlayerHomePage";
 import ImageCropModal from "../../shared/components/ImageCropModal";
@@ -238,14 +245,28 @@ export default function FacilityDetailPage() {
   const pendingCourtTargetRef = useRef<{ courtId: number; courtName: string } | null>(null);
   const [isBatchUploading, setIsBatchUploading] = useState(false);
 
-  // Modal đặt sân nhanh cho người chơi
+  // Modal đặt sân nhanh cho người chơi (kèm báo giá động & tích hợp cổng thanh toán Sprint 3)
   const [bookingCourt, setBookingCourt] = useState<CourtItem | null>(null);
   const [bookingDate, setBookingDate] = useState(() => getLocalTodayIso());
   const [bookingStartTime, setBookingStartTime] = useState(() => getInitialBookingTimes(getLocalTodayIso()).startTime);
   const [bookingEndTime, setBookingEndTime] = useState(() => getInitialBookingTimes(getLocalTodayIso()).endTime);
+  const [bookingPaymentChoice, setBookingPaymentChoice] = useState<"VNPAY" | "MOMO" | "VIETQR" | "LATER">("VNPAY");
+  const [courtAvailability, setCourtAvailability] = useState<CourtAvailabilityResponse | null>(null);
+  const [bookingQuote, setBookingQuote] = useState<BookingQuoteResponse | null>(null);
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState<string | null>(null);
   const [bookingErrorMsg, setBookingErrorMsg] = useState<string | null>(null);
+
+  // Modal cổng thanh toán trực tuyến ngay sau khi tạo đơn đặt sân (S3-08 & S3-09)
+  const [activePaymentBooking, setActivePaymentBooking] = useState<{
+    bookingId: number;
+    courtName: string;
+    bookingDate: string;
+    startTime: string;
+    endTime: string;
+    totalPrice: number;
+    initialTab: "VNPAY" | "MOMO" | "VIETQR";
+  } | null>(null);
 
   // Mở modal đặt sân và tự động chọn khung giờ tương lai gần nhất
   function handleOpenBooking(court: CourtItem) {
@@ -254,9 +275,47 @@ export default function FacilityDetailPage() {
     setBookingDate(initial.bookingDate);
     setBookingStartTime(initial.startTime);
     setBookingEndTime(initial.endTime);
+    setBookingPaymentChoice("VNPAY");
     setBookingErrorMsg(null);
     setBookingSuccessMsg(null);
   }
+
+  // Tải lịch trống/đã đặt và báo giá động tự động khi người chơi đổi ngày hoặc khung giờ
+  useEffect(() => {
+    if (!bookingCourt) {
+      setCourtAvailability(null);
+      setBookingQuote(null);
+      return;
+    }
+
+    let cancelled = false;
+    getCourtAvailabilityApi(bookingCourt.court_id, bookingDate)
+      .then((avail) => {
+        if (!cancelled) setCourtAvailability(avail);
+      })
+      .catch(() => {
+        if (!cancelled) setCourtAvailability(null);
+      });
+
+    if (timeToMinutes(bookingEndTime) > timeToMinutes(bookingStartTime)) {
+      getBookingQuoteApi({
+        courtId: bookingCourt.court_id,
+        bookingDate,
+        startTime: bookingStartTime,
+        endTime: bookingEndTime,
+      })
+        .then((q) => {
+          if (!cancelled) setBookingQuote(q);
+        })
+        .catch(() => {
+          if (!cancelled) setBookingQuote(null);
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingCourt, bookingDate, bookingStartTime, bookingEndTime]);
 
   // Khi đổi ngày đặt sân: tự động chỉnh giờ nếu khung giờ hiện tại bị rơi vào quá khứ
   function handleBookingDateChange(newDate: string) {
@@ -649,7 +708,7 @@ export default function FacilityDetailPage() {
     setBookingSuccessMsg(null);
 
     try {
-      await createWalkInBookingApi({
+      const res = await createWalkInBookingApi({
         courtId: bookingCourt.court_id,
         bookingDate,
         startTime: bookingStartTime,
@@ -658,13 +717,38 @@ export default function FacilityDetailPage() {
         customerEmail: user.email,
       });
 
-      setBookingSuccessMsg(`Đặt sân "${bookingCourt.court_name}" thành công!`);
-      setTimeout(() => {
+      const createdBooking = res?.data;
+      const createdId = createdBooking?.booking_id;
+      const createdPrice = Number(
+        createdBooking?.total_price ||
+          bookingQuote?.totalPrice ||
+          bookingCourt.price_per_hour ||
+          200000
+      );
+
+      if (createdId && bookingPaymentChoice !== "LATER") {
+        const targetCourtName = bookingCourt.court_name;
         setBookingCourt(null);
-        setBookingSuccessMsg(null);
-      }, 2000);
+        setActivePaymentBooking({
+          bookingId: createdId,
+          courtName: targetCourtName,
+          bookingDate,
+          startTime: bookingStartTime,
+          endTime: bookingEndTime,
+          totalPrice: createdPrice,
+          initialTab: bookingPaymentChoice,
+        });
+      } else {
+        setBookingSuccessMsg(
+          `Đặt giữ chỗ sân "${bookingCourt.court_name}" (#SPL-${createdId || ""}) thành công! Bạn có thể thanh toán tại mục "Lịch đặt của tôi".`
+        );
+        setTimeout(() => {
+          setBookingCourt(null);
+          setBookingSuccessMsg(null);
+        }, 2200);
+      }
     } catch (err: unknown) {
-      const errorObj = err as { response?: { data?: { message?: string } }; message?: string };
+      const errorObj = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
       setBookingErrorMsg(
         errorObj.response?.data?.message || "Không thể đặt sân vào khung giờ này."
       );
@@ -1400,6 +1484,115 @@ export default function FacilityDetailPage() {
                 </div>
               </div>
 
+              {/* Hiển thị các khung giờ đã có người đặt trong ngày (nếu có) */}
+              {courtAvailability && courtAvailability.bookedSlots.length > 0 && (
+                <div className="p-3 rounded-2xl bg-gray-50 border border-gray-200 text-xs">
+                  <span className="font-bold text-gray-700 block mb-1.5">
+                    📌 Khung giờ đã có người đặt trong ngày {bookingDate}:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {courtAvailability.bookedSlots.map((slot) => (
+                      <span
+                        key={slot.bookingId}
+                        className="px-2 py-0.5 rounded-lg bg-red-50 text-red-700 border border-red-200 font-semibold text-[11px]"
+                      >
+                        {slot.startTime} - {slot.endTime}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Báo giá động tự động theo khung giờ (TC01) */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-200 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 font-medium">
+                    Thời lượng ({bookingStartTime} – {bookingEndTime}):
+                  </span>
+                  <span className="font-bold text-gray-900">
+                    {bookingQuote
+                      ? `${bookingQuote.durationHours} giờ (${
+                          bookingQuote.dayType === "HOLIDAY"
+                            ? "Ngày lễ"
+                            : bookingQuote.dayType === "WEEKEND"
+                              ? "Cuối tuần"
+                              : "Ngày thường"
+                        })`
+                      : `${((timeToMinutes(bookingEndTime) - timeToMinutes(bookingStartTime)) / 60).toFixed(1)} giờ`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-blue-200/70">
+                  <span className="font-bold text-blue-900">Tổng tiền tự động:</span>
+                  <strong className="text-base font-black text-blue-700">
+                    {formatCurrency(
+                      bookingQuote?.totalPrice ||
+                        Math.round(
+                          ((timeToMinutes(bookingEndTime) - timeToMinutes(bookingStartTime)) / 60) *
+                            (bookingCourt.price_per_hour || 150000)
+                        )
+                    )}
+                  </strong>
+                </div>
+                {bookingQuote && !bookingQuote.isAvailable && bookingQuote.conflictReason && (
+                  <p className="text-[11px] font-bold text-red-600 pt-0.5">
+                    ⚠️ {bookingQuote.conflictReason}
+                  </p>
+                )}
+              </div>
+
+              {/* Chọn phương thức thanh toán sau khi giữ sân */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  Phương thức thanh toán (S3-08 & S3-09):
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setBookingPaymentChoice("VNPAY")}
+                    className={`p-2 rounded-xl border text-left font-bold transition cursor-pointer ${
+                      bookingPaymentChoice === "VNPAY"
+                        ? "border-blue-600 bg-blue-50 text-blue-800"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    🏦 Cổng VNPay Sandbox
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingPaymentChoice("MOMO")}
+                    className={`p-2 rounded-xl border text-left font-bold transition cursor-pointer ${
+                      bookingPaymentChoice === "MOMO"
+                        ? "border-pink-600 bg-pink-50 text-pink-800"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    👛 Ví MoMo Sandbox
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingPaymentChoice("VIETQR")}
+                    className={`p-2 rounded-xl border text-left font-bold transition cursor-pointer ${
+                      bookingPaymentChoice === "VIETQR"
+                        ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    📲 Mã VietQR Dự phòng
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingPaymentChoice("LATER")}
+                    className={`p-2 rounded-xl border text-left font-bold transition cursor-pointer ${
+                      bookingPaymentChoice === "LATER"
+                        ? "border-gray-900 bg-gray-100 text-gray-900"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    ⏳ Đặt giữ chỗ, trả sau
+                  </button>
+                </div>
+              </div>
+
               {isPastBookingSlot(bookingDate, bookingStartTime) && (
                 <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-800 text-xs flex items-center gap-2">
                   <span>⏰</span>
@@ -1437,14 +1630,33 @@ export default function FacilityDetailPage() {
                 className="px-5 py-2.5 rounded-xl text-xs font-bold bg-black text-white hover:bg-gray-800 transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 {bookingSubmitting
-                  ? "Đang gửi..."
+                  ? "Đang khóa & tạo đơn..."
                   : isPastBookingSlot(bookingDate, bookingStartTime)
                   ? "Khung giờ đã qua"
-                  : "Xác nhận đặt"}
+                  : bookingPaymentChoice === "LATER"
+                  ? "Xác nhận đặt giữ chỗ"
+                  : `Đặt sân & Thanh toán (${bookingPaymentChoice})`}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL 5: Cổng thanh toán Sandbox & Dự phòng VietQR */}
+      {activePaymentBooking && (
+        <PaymentSandboxModal
+          isOpen={Boolean(activePaymentBooking)}
+          bookingId={activePaymentBooking.bookingId}
+          courtName={activePaymentBooking.courtName}
+          facilityName={facility.name}
+          bookingDate={activePaymentBooking.bookingDate}
+          startTime={activePaymentBooking.startTime}
+          endTime={activePaymentBooking.endTime}
+          totalPrice={activePaymentBooking.totalPrice}
+          initialTab={activePaymentBooking.initialTab}
+          onClose={() => setActivePaymentBooking(null)}
+          onPaymentSuccess={() => {}}
+        />
       )}
     </div>
   );
