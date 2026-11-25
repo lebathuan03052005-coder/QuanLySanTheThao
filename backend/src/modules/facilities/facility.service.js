@@ -736,22 +736,18 @@ export async function updateCourtInFacility(courtId, ownerId, data) {
 }
 
 /**
- * Ngừng hoạt động / kích hoạt lại sân con. Không xóa cứng lịch sử đặt sân.
- * @param {number} courtId
- * @param {number} ownerId
- * @param {'ACTIVE' | 'INACTIVE'} status
+ * [3.1 - S3-15] Kiểm tra danh sách các đơn đặt sân của Người chơi đang bị ảnh hưởng
+ * khi Chủ sân dự định chuyển sân sang trạng thái Bảo trì (MAINTENANCE) / Tạm đóng (INACTIVE)
+ * hoặc khóa khung giờ bảo trì.
  */
-export async function updateCourtStatus(courtId, ownerId, status) {
-  const normalizedStatus = (status || '').toUpperCase();
-  if (!['ACTIVE', 'INACTIVE'].includes(normalizedStatus)) {
-    throw new AppError("Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' hoặc 'INACTIVE'.", 400);
-  }
-
+export async function getAffectedBookingsForCourt(courtId, ownerId, query = {}) {
   const pool = await getPool();
-  const checkCourt = await pool.request()
+  const checkCourt = await pool
+    .request()
     .input('courtId', courtId)
     .query(`
-      SELECT c.*, f.owner_id AS facility_owner_id 
+      SELECT c.court_id, c.court_name, c.status, c.owner_id, c.facility_id,
+             f.name AS facility_name, f.owner_id AS facility_owner_id
       FROM courts c
       LEFT JOIN facilities f ON c.facility_id = f.facility_id
       WHERE c.court_id = @courtId
@@ -762,11 +758,119 @@ export async function updateCourtStatus(courtId, ownerId, status) {
     throw new AppError('Sân không tồn tại.', 404);
   }
 
-  if (court.owner_id !== ownerId && court.facility_owner_id !== ownerId) {
+  if (Number(court.owner_id) !== Number(ownerId) && Number(court.facility_owner_id) !== Number(ownerId)) {
+    throw new AppError('Bạn không có quyền kiểm tra đơn đặt sân của chủ sân khác.', 403);
+  }
+
+  const req = pool.request().input('courtId', courtId);
+  let sqlStr = `
+    SELECT b.booking_id, b.court_id, b.user_id, b.customer_id,
+           CONVERT(VARCHAR(10), b.booking_date, 120) AS booking_date,
+           CONVERT(VARCHAR(5), b.start_time, 108) AS start_time,
+           CONVERT(VARCHAR(5), b.end_time, 108) AS end_time,
+           b.total_price, b.deposit_amount, b.status, b.payment_status,
+           COALESCE(cust.full_name, u.full_name, N'Khách vãng lai') AS player_name,
+           COALESCE(cust.phone, u.phone, '') AS player_phone,
+           COALESCE(cust.email, u.email, '') AS player_email
+    FROM bookings b
+    LEFT JOIN customers cust ON b.customer_id = cust.customer_id
+    LEFT JOIN users u ON b.user_id = u.user_id
+    WHERE b.court_id = @courtId
+      AND b.status IN ('PENDING', 'CONFIRMED', 'CHECKED-IN')
+  `;
+
+  if (query.date) {
+    req.input('targetDate', query.date);
+    sqlStr += ` AND b.booking_date = @targetDate`;
+    if (query.startTime && query.endTime) {
+      const sTime = query.startTime.length === 5 ? `${query.startTime}:00` : query.startTime;
+      const eTime = query.endTime.length === 5 ? `${query.endTime}:00` : query.endTime;
+      req.input('sTime', sTime);
+      req.input('eTime', eTime);
+      sqlStr += ` AND b.start_time < CAST(@eTime AS TIME) AND b.end_time > CAST(@sTime AS TIME)`;
+    }
+  } else {
+    sqlStr += ` AND b.booking_date >= CAST(GETDATE() AS DATE)`;
+  }
+
+  sqlStr += ` ORDER BY b.booking_date ASC, b.start_time ASC`;
+  const bookingsRes = await req.query(sqlStr);
+
+  const affectedBookings = bookingsRes.recordset.map((b) => ({
+    bookingId: b.booking_id,
+    courtId: b.court_id,
+    userId: b.user_id,
+    customerId: b.customer_id,
+    bookingDate: b.booking_date,
+    startTime: b.start_time,
+    endTime: b.end_time,
+    totalPrice: Number(b.total_price || 0),
+    depositAmount: Number(b.deposit_amount || 0),
+    status: b.status,
+    paymentStatus: b.payment_status || 'UNPAID',
+    playerName: b.player_name,
+    playerPhone: b.player_phone,
+    playerEmail: b.player_email,
+  }));
+
+  return {
+    courtId: court.court_id,
+    courtName: court.court_name,
+    facilityName: court.facility_name || 'Cơ sở SportLink',
+    currentStatus: court.status || 'ACTIVE',
+    affectedCount: affectedBookings.length,
+    affectedBookings,
+  };
+}
+
+/**
+ * [3.1 - S3-15] Cập nhật trạng thái sân con: Hoạt động (ACTIVE) / Bảo trì (MAINTENANCE) / Tạm đóng (INACTIVE).
+ * Khi chuyển sang MAINTENANCE hoặc INACTIVE:
+ *  - Chặn mọi lượt đặt sân mới của Người chơi.
+ *  - Tự động quét và cảnh báo danh sách các đơn đặt sân của Người chơi đang bị ảnh hưởng.
+ *  - Gửi thông báo cảnh báo in-app tới Người chơi (hoặc hủy & hoàn tiền 100% nếu cancelAffected = true).
+ * @param {number} courtId
+ * @param {number} ownerId
+ * @param {'ACTIVE' | 'MAINTENANCE' | 'INACTIVE'} status
+ * @param {{ reason?: string, notifyPlayers?: boolean, cancelAffected?: boolean }} options
+ */
+export async function updateCourtStatus(courtId, ownerId, status, options = {}) {
+  const normalizedStatus = (status || '').toUpperCase();
+  if (!['ACTIVE', 'MAINTENANCE', 'INACTIVE'].includes(normalizedStatus)) {
+    throw new AppError(
+      "Trạng thái không hợp lệ. Chỉ chấp nhận 'ACTIVE' (Hoạt động), 'MAINTENANCE' (Bảo trì) hoặc 'INACTIVE' (Tạm đóng).",
+      400
+    );
+  }
+
+  const pool = await getPool();
+  const checkCourt = await pool
+    .request()
+    .input('courtId', courtId)
+    .query(`
+      SELECT c.*, f.name AS facility_name, f.owner_id AS facility_owner_id 
+      FROM courts c
+      LEFT JOIN facilities f ON c.facility_id = f.facility_id
+      WHERE c.court_id = @courtId
+    `);
+
+  const court = checkCourt.recordset[0];
+  if (!court) {
+    throw new AppError('Sân không tồn tại.', 404);
+  }
+
+  if (Number(court.owner_id) !== Number(ownerId) && Number(court.facility_owner_id) !== Number(ownerId)) {
     throw new AppError('Bạn không có quyền quản lý sân bóng này.', 403);
   }
 
-  const result = await pool.request()
+  // Kiểm tra danh sách đơn đặt sân bị ảnh hưởng nếu chuyển sang MAINTENANCE hoặc INACTIVE
+  let affectedInfo = { affectedCount: 0, affectedBookings: [] };
+  if (normalizedStatus === 'MAINTENANCE' || normalizedStatus === 'INACTIVE') {
+    affectedInfo = await getAffectedBookingsForCourt(courtId, ownerId);
+  }
+
+  const result = await pool
+    .request()
     .input('courtId', courtId)
     .input('status', normalizedStatus)
     .query(`
@@ -776,5 +880,91 @@ export async function updateCourtStatus(courtId, ownerId, status) {
       WHERE court_id = @courtId
     `);
 
-  return result.recordset[0];
+  const updatedCourt = result.recordset[0];
+  const maintenanceReason =
+    (options.reason || '').trim() ||
+    (normalizedStatus === 'MAINTENANCE'
+      ? 'Sân tạm ngưng để bảo trì kỹ thuật & nâng cấp mặt sân'
+      : 'Sân tạm đóng ngưng nhận lịch đặt mới');
+
+  // Xử lý thông báo cảnh báo hoặc hủy hoàn tiền cho các đơn bị ảnh hưởng
+  let notifiedCount = 0;
+  let cancelledCount = 0;
+
+  if (
+    (normalizedStatus === 'MAINTENANCE' || normalizedStatus === 'INACTIVE') &&
+    affectedInfo.affectedBookings.length > 0
+  ) {
+    for (const bk of affectedInfo.affectedBookings) {
+      if (options.cancelAffected) {
+        try {
+          await pool
+            .request()
+            .input('bid', bk.bookingId)
+            .input('reason', `[Bảo trì sân] ${maintenanceReason}`)
+            .input('refund', bk.depositAmount > 0 ? bk.depositAmount : 0)
+            .query(`
+              UPDATE bookings
+              SET status = 'CANCELLED',
+                  cancel_reason = @reason,
+                  cancelled_at = GETDATE(),
+                  refund_amount = CASE WHEN @refund > 0 THEN @refund ELSE refund_amount END,
+                  payment_status = CASE WHEN @refund > 0 THEN 'REFUNDED' ELSE payment_status END,
+                  updated_at = GETDATE()
+              WHERE booking_id = @bid
+            `);
+          cancelledCount++;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (options.notifyPlayers !== false && bk.userId) {
+        try {
+          const notifTitle = options.cancelAffected
+            ? `⚠️ Thông báo hủy & hoàn tiền đơn #SPL-${bk.bookingId} do bảo trì sân`
+            : `⚠️ Cảnh báo: Sân "${court.court_name}" chuyển sang trạng thái Bảo trì`;
+          const notifContent = options.cancelAffected
+            ? `Sân "${court.court_name}" (${bk.bookingDate} ${bk.startTime}-${bk.endTime}) phải bảo trì đột xuất (${maintenanceReason}). Đơn #SPL-${bk.bookingId} đã được hủy và hoàn tiền 100%.`
+            : `Sân "${court.court_name}" hiện đang chuyển sang trạng thái Bảo trì (${maintenanceReason}). Đơn đặt sân #SPL-${bk.bookingId} ngày ${bk.bookingDate} (${bk.startTime}-${bk.endTime}) của bạn đang bị ảnh hưởng, Chủ sân sẽ liên hệ hỗ trợ đổi sân hoặc hoàn tiền 100%.`;
+
+          await pool
+            .request()
+            .input('uid', bk.userId)
+            .input('title', notifTitle)
+            .input('content', notifContent)
+            .query(`
+              IF EXISTS (SELECT * FROM sys.tables WHERE name = 'notifications')
+              BEGIN
+                INSERT INTO notifications (user_id, title, content, is_read, created_at)
+                VALUES (@uid, @title, @content, 0, GETDATE())
+              END
+            `);
+          notifiedCount++;
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  const warningMessage =
+    affectedInfo.affectedCount > 0
+      ? options.cancelAffected
+        ? `Đã chuyển sân "${court.court_name}" sang ${normalizedStatus}, tự động hủy & hoàn tiền cho ${cancelledCount} đơn bị ảnh hưởng và thông báo cho Người chơi.`
+        : `⚠️ Cảnh báo: Sân "${court.court_name}" đã chuyển sang ${normalizedStatus}. Phát hiện ${affectedInfo.affectedCount} đơn đặt sân đang hiệu lực bị ảnh hưởng (đã gửi thông báo cảnh báo tới ${notifiedCount} người chơi).`
+      : normalizedStatus === 'MAINTENANCE'
+        ? `Đã chuyển sân "${court.court_name}" sang trạng thái Đang bảo trì (MAINTENANCE) và chặn đặt sân mới.`
+        : normalizedStatus === 'ACTIVE'
+          ? `Đã mở hoạt động trở lại cho sân "${court.court_name}".`
+          : `Đã tạm đóng sân "${court.court_name}".`;
+
+  return {
+    ...updatedCourt,
+    affectedCount: affectedInfo.affectedCount,
+    affectedBookings: affectedInfo.affectedBookings,
+    notifiedCount,
+    cancelledCount,
+    warningMessage,
+  };
 }

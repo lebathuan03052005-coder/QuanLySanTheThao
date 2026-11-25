@@ -3,16 +3,19 @@ import {
   fetchScheduleApi,
   createWalkInBookingApi,
   updateBookingStatusApi,
+  rejectOnlineBookingApi,
+  getOwnerBookingsListApi,
   createMaintenanceApi,
   deleteMaintenanceApi,
   type ScheduleResponse,
   type ScheduleBooking,
   type ScheduleCourt,
   type ScheduleMaintenance,
+  type PlayerBookingItem,
 } from './booking.api';
 import { useAuthStore } from '../../shared/stores/authStore';
 
-type ViewMode = 'day' | 'week' | 'month';
+type ViewMode = 'day' | 'week' | 'month' | 'online_orders';
 
 // Ma trận khung giờ hoạt động tiêu chuẩn từ 06:00 đến 23:00 (17 ca x 1 giờ: 06:00..22:00 -> 23:00)
 const HOURS = Array.from({ length: 17 }, (_, i) => i + 6);
@@ -224,6 +227,25 @@ export default function CourtSchedulePage() {
   const [activeBooking, setActiveBooking] = useState<ScheduleBooking | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<boolean>(false);
 
+  // [S3-14] Danh sách đơn đặt Online có lọc, từ chối kèm lý do & thông báo Người chơi
+  const [onlineOrders, setOnlineOrders] = useState<PlayerBookingItem[]>([]);
+  const [loadingOnlineOrders, setLoadingOnlineOrders] = useState<boolean>(false);
+  const [orderKeyword, setOrderKeyword] = useState<string>('');
+  const [orderPaymentFilter, setOrderPaymentFilter] = useState<string>('ALL');
+  const [rejectModalBooking, setRejectModalBooking] = useState<{
+    bookingId: number;
+    playerName: string;
+    courtName: string;
+    bookingDate: string;
+    startTime: string;
+    endTime: string;
+    totalPrice: number;
+  } | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>(
+    'Sân đang bảo trì đột xuất tại khung giờ này, mong quý khách thông cảm.'
+  );
+  const [rejectSubmitting, setRejectSubmitting] = useState<boolean>(false);
+
   // Modal khóa sân bảo trì
   const [isMaintModalOpen, setIsMaintModalOpen] = useState<boolean>(false);
   const [maintForm, setMaintForm] = useState({
@@ -290,6 +312,39 @@ export default function CourtSchedulePage() {
     selectedSportId,
     selectedCourtId,
     selectedStatus,
+  ]);
+
+  async function loadOnlineOrders() {
+    setLoadingOnlineOrders(true);
+    try {
+      const list = await getOwnerBookingsListApi({
+        status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
+        paymentStatus: orderPaymentFilter !== 'ALL' ? orderPaymentFilter : undefined,
+        facilityId: selectedFacilityId !== 'ALL' ? selectedFacilityId : undefined,
+        courtId: selectedCourtId !== 'ALL' ? selectedCourtId : undefined,
+        sportId: selectedSportId !== 'ALL' ? selectedSportId : undefined,
+        keyword: orderKeyword.trim() || undefined,
+      });
+      setOnlineOrders(list);
+    } catch {
+      setOnlineOrders([]);
+    } finally {
+      setLoadingOnlineOrders(false);
+    }
+  }
+
+  useEffect(() => {
+    if (viewMode === 'online_orders') {
+      loadOnlineOrders();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    viewMode,
+    selectedStatus,
+    orderPaymentFilter,
+    selectedFacilityId,
+    selectedCourtId,
+    selectedSportId,
   ]);
 
   function showToast(msg: string) {
@@ -459,14 +514,20 @@ export default function CourtSchedulePage() {
     }
   }
 
-  async function handleChangeBookingStatus(newStatus: string) {
-    if (!activeBooking) return;
+  async function handleChangeBookingStatus(newStatus: string, targetId?: number) {
+    const id = targetId || activeBooking?.bookingId;
+    if (!id) return;
     setUpdatingStatus(true);
     try {
-      await updateBookingStatusApi(activeBooking.bookingId, newStatus);
-      showToast(`Đã cập nhật trạng thái đơn #${activeBooking.bookingId} thành ${newStatus}`);
+      await updateBookingStatusApi(id, newStatus);
+      showToast(
+        `Đã cập nhật trạng thái đơn #${id} thành ${newStatus} và gửi thông báo cho Người chơi!`
+      );
       setActiveBooking(null);
       await loadSchedule();
+      if (viewMode === 'online_orders') {
+        await loadOnlineOrders();
+      }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setErrorMsg(
@@ -474,6 +535,41 @@ export default function CourtSchedulePage() {
       );
     } finally {
       setUpdatingStatus(false);
+    }
+  }
+
+  async function handleConfirmRejectBooking(e: React.FormEvent) {
+    e.preventDefault();
+    if (!rejectModalBooking) return;
+    if (!rejectReason.trim()) {
+      setErrorMsg('Vui lòng nhập lý do từ chối đơn đặt sân.');
+      return;
+    }
+
+    setRejectSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const res = await rejectOnlineBookingApi(
+        rejectModalBooking.bookingId,
+        rejectReason.trim()
+      );
+      showToast(
+        res.message ||
+          `Đã từ chối đơn #${rejectModalBooking.bookingId} và gửi thông báo cho Người chơi!`
+      );
+      setRejectModalBooking(null);
+      setActiveBooking(null);
+      await loadSchedule();
+      if (viewMode === 'online_orders') {
+        await loadOnlineOrders();
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setErrorMsg(
+        e.response?.data?.message || 'Không thể từ chối đơn đặt sân.'
+      );
+    } finally {
+      setRejectSubmitting(false);
     }
   }
 
@@ -724,12 +820,16 @@ export default function CourtSchedulePage() {
       {/* Thanh công cụ điều hướng Ngày/Tuần/Tháng & Bộ lọc Cơ sở / Sân con / Môn thể thao / Trạng thái */}
       <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-200/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="bg-slate-100 p-1 rounded-2xl flex items-center">
+          <div className="bg-slate-100 p-1 rounded-2xl flex items-center flex-wrap">
             {(
               [
                 { id: 'day', label: 'Theo Ngày' },
                 { id: 'week', label: 'Theo Tuần' },
                 { id: 'month', label: 'Theo Tháng' },
+                {
+                  id: 'online_orders',
+                  label: `📋 Xử lý đơn đặt Online (${kpiStats.pendingCount} chờ duyệt)`,
+                },
               ] as const
             ).map((tab) => (
               <button
@@ -738,7 +838,9 @@ export default function CourtSchedulePage() {
                 onClick={() => setViewMode(tab.id)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                   viewMode === tab.id
-                    ? 'bg-white text-blue-600 shadow-sm'
+                    ? tab.id === 'online_orders'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-white text-blue-600 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -1329,7 +1431,7 @@ export default function CourtSchedulePage() {
               </tbody>
             </table>
           </div>
-        ) : (
+        ) : viewMode === 'month' ? (
           /* ======================== 3. VIEW THEO THÁNG ======================== */
           <div className="p-4 flex-1">
             <div className="grid grid-cols-7 gap-2 mb-2 text-center text-xs font-bold text-slate-600">
@@ -1417,6 +1519,199 @@ export default function CourtSchedulePage() {
                 );
               })}
             </div>
+          </div>
+        ) : (
+          /* ======================== 4. VIEW XỬ LÝ ĐƠN ĐẶT ONLINE (S3-14) ======================== */
+          <div className="p-5 flex-1 flex flex-col gap-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div>
+                <h2 className="text-base font-extrabold text-slate-800">
+                  📋 Danh Sách & Xử Lý Đơn Đặt Sân Online (WBS 3.1.8 - S3-14)
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Chủ sân & Nhân viên lọc đơn, xác nhận giữ sân, từ chối (kèm lý do bắt buộc & tự động hoàn tiền) hoặc hủy đơn và gửi thông báo tức thì cho Người chơi.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={orderKeyword}
+                  onChange={(e) => setOrderKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && loadOnlineOrders()}
+                  placeholder="Tìm mã đơn, tên sân, khách..."
+                  className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-500 w-56"
+                />
+                <select
+                  value={orderPaymentFilter}
+                  onChange={(e) => setOrderPaymentFilter(e.target.value)}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="ALL">💳 Mọi TT thanh toán</option>
+                  <option value="PAID">Đã thanh toán đủ</option>
+                  <option value="DEPOSIT_PAID">Đã đặt cọc</option>
+                  <option value="UNPAID">Chưa thanh toán</option>
+                  <option value="REFUNDED">Đã hoàn tiền</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={loadOnlineOrders}
+                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+                >
+                  Lọc đơn
+                </button>
+              </div>
+            </div>
+
+            {loadingOnlineOrders ? (
+              <div className="py-16 text-center text-slate-400 text-sm">
+                Đang tải danh sách đơn đặt sân...
+              </div>
+            ) : onlineOrders.length === 0 ? (
+              <div className="py-16 text-center text-slate-400 text-sm">
+                Không có đơn đặt sân nào khớp với bộ lọc hiện tại.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[960px]">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-600 uppercase">
+                      <th className="p-3">Mã đơn</th>
+                      <th className="p-3">Sân & Cơ sở</th>
+                      <th className="p-3">Khung giờ đặt</th>
+                      <th className="p-3">Tổng tiền / Đã thu</th>
+                      <th className="p-3">Trạng thái đơn</th>
+                      <th className="p-3">Lý do từ chối / Ghi chú</th>
+                      <th className="p-3 text-right">Thao tác xử lý (Chủ sân / Staff)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {onlineOrders.map((ord) => {
+                      const badge = STATUS_BADGE[ord.status] || STATUS_BADGE.CONFIRMED;
+                      const bDate = String(ord.booking_date || '').slice(0, 10);
+                      return (
+                        <tr key={ord.booking_id} className="hover:bg-slate-50/70">
+                          <td className="p-3 font-mono font-bold text-blue-700">
+                            #SPL-{ord.booking_id}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-800">{ord.court_name}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {ord.facility_name || ord.court_address} • {ord.sport_name}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-800">{formatDateVi(bDate)}</div>
+                            <div className="text-[11px] text-blue-600 font-semibold">
+                              {ord.start_time} - {ord.end_time}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-emerald-700">
+                              {formatVnd(ord.total_price)}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              Đã thu: {formatVnd(ord.paid_amount || ord.deposit_amount || 0)} ({ord.payment_status})
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${badge.bg} ${badge.text} ${badge.border}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td className="p-3 max-w-xs">
+                            {ord.cancel_reason ? (
+                              <span className="text-[11px] text-rose-700 font-medium line-clamp-2">
+                                {ord.cancel_reason}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <div className="inline-flex items-center justify-end gap-1.5 flex-wrap">
+                              {ord.status === 'PENDING' && (
+                                <button
+                                  type="button"
+                                  disabled={updatingStatus}
+                                  onClick={() =>
+                                    handleChangeBookingStatus('CONFIRMED', ord.booking_id)
+                                  }
+                                  className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold cursor-pointer"
+                                >
+                                  ✓ Xác nhận
+                                </button>
+                              )}
+                              {['PENDING', 'CONFIRMED'].includes(ord.status) && (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={updatingStatus}
+                                    onClick={() =>
+                                      handleChangeBookingStatus('CHECKED-IN', ord.booking_id)
+                                    }
+                                    className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer"
+                                  >
+                                    🏃 Check-in
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRejectModalBooking({
+                                        bookingId: ord.booking_id,
+                                        playerName: `Khách hàng #${ord.user_id || ord.customer_id || ord.booking_id}`,
+                                        courtName: ord.court_name,
+                                        bookingDate: bDate,
+                                        startTime: ord.start_time,
+                                        endTime: ord.end_time,
+                                        totalPrice: ord.total_price,
+                                      });
+                                      setRejectReason(
+                                        'Sân bảo trì đột xuất / Không đủ điều kiện phục vụ khung giờ này'
+                                      );
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-bold cursor-pointer"
+                                  >
+                                    ✕ Từ chối (Lý do)
+                                  </button>
+                                </>
+                              )}
+                              {['CONFIRMED', 'CHECKED-IN'].includes(ord.status) && (
+                                <button
+                                  type="button"
+                                  disabled={updatingStatus}
+                                  onClick={() =>
+                                    handleChangeBookingStatus('COMPLETED', ord.booking_id)
+                                  }
+                                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold cursor-pointer"
+                                >
+                                  💰 Hoàn thành
+                                </button>
+                              )}
+                              {ord.status !== 'CANCELLED' && ord.status !== 'COMPLETED' && (
+                                <button
+                                  type="button"
+                                  disabled={updatingStatus}
+                                  onClick={() =>
+                                    handleChangeBookingStatus('CANCELLED', ord.booking_id)
+                                  }
+                                  className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold cursor-pointer"
+                                >
+                                  Hủy
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1768,6 +2063,29 @@ export default function CourtSchedulePage() {
                     ⚠️ Khách không đến (No-show)
                   </button>
                 )}
+                {['PENDING', 'CONFIRMED'].includes(activeBooking.status) && (
+                  <button
+                    type="button"
+                    disabled={updatingStatus}
+                    onClick={() => {
+                      setRejectModalBooking({
+                        bookingId: activeBooking.bookingId,
+                        playerName: activeBooking.playerName,
+                        courtName: activeBooking.courtName,
+                        bookingDate: activeBooking.bookingDate,
+                        startTime: activeBooking.startTime,
+                        endTime: activeBooking.endTime,
+                        totalPrice: activeBooking.totalPrice,
+                      });
+                      setRejectReason(
+                        'Sân bảo trì đột xuất / Không đủ điều kiện phục vụ khung giờ này'
+                      );
+                    }}
+                    className="py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold cursor-pointer col-span-2"
+                  >
+                    🚫 Từ chối đơn đặt Online (Kèm lý do & Thông báo Người chơi)
+                  </button>
+                )}
                 {activeBooking.status !== 'CANCELLED' &&
                   activeBooking.status !== 'COMPLETED' && (
                     <button
@@ -1913,6 +2231,109 @@ export default function CourtSchedulePage() {
                   className="px-4 py-2 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold cursor-pointer"
                 >
                   Khóa lịch bảo trì
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ======================== MODAL 4: TỪ CHỐI ĐƠN ĐẶT ONLINE KÈM LÝ DO (S3-14) ======================== */}
+      {rejectModalBooking && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[11px] font-bold text-amber-700 uppercase">
+                  WBS 3.1.8 • Từ chối đơn đặt Online
+                </span>
+                <h3 className="text-lg font-bold text-slate-800">
+                  Từ Chối Đơn #SPL-{rejectModalBooking.bookingId}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectModalBooking(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRejectBooking} className="mt-4 space-y-3.5">
+              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Sân:</span>
+                  <strong className="text-slate-800">{rejectModalBooking.courtName}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Khung giờ:</span>
+                  <strong className="text-blue-600">
+                    {formatDateVi(rejectModalBooking.bookingDate)} ({rejectModalBooking.startTime} -{' '}
+                    {rejectModalBooking.endTime})
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Tổng tiền đơn:</span>
+                  <strong className="text-emerald-700">
+                    {formatVnd(rejectModalBooking.totalPrice)}
+                  </strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Chọn nhanh lý do từ chối phổ biến:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Sân đang bảo trì đột xuất tại khung giờ này',
+                    'Sự cố thời tiết / Mất điện khu vực cụm sân',
+                    'Trùng lịch giải đấu nội bộ của cơ sở',
+                    'Không xác minh được thông tin thanh toán cọc',
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setRejectReason(preset)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-amber-50 hover:text-amber-800 border border-slate-200 text-[11px] font-medium text-slate-700 transition cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Lý do từ chối gửi tới Người chơi *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Nhập lý do cụ thể để thông báo cho người chơi..."
+                  className="w-full rounded-2xl border border-slate-300 px-3.5 py-2 text-xs md:text-sm focus:outline-none focus:border-amber-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  * Hệ thống sẽ tự động hoàn lại 100% số tiền khách đã thanh toán/đặt cọc (nếu có) và gửi thông báo kèm lý do này đến tài khoản Người chơi.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRejectModalBooking(null)}
+                  className="px-4 py-2 rounded-2xl border border-slate-300 text-xs font-semibold text-slate-600 cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  disabled={rejectSubmitting || !rejectReason.trim()}
+                  className="px-5 py-2 rounded-2xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold shadow-md cursor-pointer"
+                >
+                  {rejectSubmitting ? 'Đang xử lý...' : 'Xác nhận Từ chối & Thông báo'}
                 </button>
               </div>
             </form>

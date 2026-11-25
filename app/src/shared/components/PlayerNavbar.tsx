@@ -1,9 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/authStore';
+import { useBookingCartStore } from '../stores/bookingCartStore';
+import {
+  getUserNotificationsApi,
+  markNotificationsReadApi,
+  type UserNotificationItem,
+} from '../../features/auth/auth.api';
 
 export default function PlayerNavbar() {
   const { user, logout } = useAuthStore();
+  const { items: cartItems, setOpen: setCartOpen } = useBookingCartStore();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -11,6 +18,7 @@ export default function PlayerNavbar() {
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(1);
+  const [notifications, setNotifications] = useState<UserNotificationItem[]>([]);
   const [avatarError, setAvatarError] = useState(false);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -42,12 +50,30 @@ export default function PlayerNavbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Đóng mobile menu khi chuyển trang
+  // Đóng mobile menu khi chuyển trang & tải thông báo thực tế từ Backend
   useEffect(() => {
     setMobileMenuOpen(false);
     setShowUserMenu(false);
     setShowNotificationMenu(false);
-  }, [location.pathname]);
+    if (user) {
+      getUserNotificationsApi()
+        .then((res) => {
+          if (res) {
+            setNotifications(res.notifications || []);
+            setUnreadCount(res.unreadCount ?? 0);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [location.pathname, user?.id]);
+
+  async function handleMarkAllRead() {
+    setUnreadCount(0);
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    if (user) {
+      await markNotificationsReadApi().catch(() => {});
+    }
+  }
 
   function handleLogout() {
     logout();
@@ -170,16 +196,41 @@ export default function PlayerNavbar() {
             </nav>
           </div>
 
-          {/* 3. Khu vực Thao tác bên phải (Thông báo, Tài khoản & Hamburger) */}
-          <div className="flex items-center gap-3">
-            {/* Nút Chuông thông báo có Badge số 1 màu đỏ */}
+          {/* 3. Khu vực Thao tác bên phải (Giỏ đặt sân, Thông báo, Tài khoản & Hamburger) */}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Nút Giỏ đặt sân đa khung giờ (S3-06) */}
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 text-xs font-bold transition cursor-pointer"
+              title="Giỏ đặt sân đa khung giờ (Tự động tính giá)"
+            >
+              <span>🛒</span>
+              <span className="hidden sm:inline">Giỏ đặt sân</span>
+              <span className="px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] font-black">
+                {cartItems.length}
+              </span>
+            </button>
+
+            {/* Nút Chuông thông báo có Badge số màu đỏ */}
             <div className="relative" ref={notifMenuRef}>
               <button
                 onClick={() => {
-                  setShowNotificationMenu(!showNotificationMenu);
+                  const nextOpen = !showNotificationMenu;
+                  setShowNotificationMenu(nextOpen);
                   setShowUserMenu(false);
+                  if (nextOpen && user) {
+                    getUserNotificationsApi()
+                      .then((res) => {
+                        if (res) {
+                          setNotifications(res.notifications || []);
+                          setUnreadCount(res.unreadCount ?? 0);
+                        }
+                      })
+                      .catch(() => {});
+                  }
                 }}
-                className="relative p-2 text-gray-700 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none"
+                className="relative p-2 text-gray-700 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none cursor-pointer"
                 title="Thông báo"
                 aria-label="Thông báo"
               >
@@ -200,35 +251,59 @@ export default function PlayerNavbar() {
 
               {/* Dropdown Menu Thông báo */}
               {showNotificationMenu && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-100 py-3 z-50">
+                <div className="absolute right-0 mt-2 w-84 bg-white rounded-xl shadow-xl border border-gray-100 py-3 z-50">
                   <div className="flex items-center justify-between px-4 pb-2 border-b border-gray-100">
-                    <span className="font-semibold text-sm text-gray-900">Thông báo mới</span>
+                    <span className="font-semibold text-sm text-gray-900">Thông báo hệ thống</span>
                     {unreadCount > 0 && (
                       <button
-                        onClick={() => setUnreadCount(0)}
-                        className="text-xs text-blue-600 hover:underline font-medium"
+                        onClick={handleMarkAllRead}
+                        className="text-xs text-blue-600 hover:underline font-medium cursor-pointer"
                       >
                         Đánh dấu đã đọc
                       </button>
                     )}
                   </div>
-                  <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
-                    <div className="p-3 hover:bg-gray-50 flex items-start gap-3 transition-colors cursor-pointer">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                    {notifications.length > 0 ? (
+                      notifications.map((n) => (
+                        <div
+                          key={n.notification_id}
+                          onClick={() => {
+                            setShowNotificationMenu(false);
+                            navigate('/bookings');
+                          }}
+                          className={`p-3 hover:bg-gray-50 flex items-start gap-3 transition-colors cursor-pointer ${
+                            !n.is_read ? 'bg-blue-50/40' : ''
+                          }`}
+                        >
+                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold">
+                            🔔
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-gray-900">{n.title}</p>
+                            <p className="text-[11px] text-gray-600 mt-0.5 leading-relaxed">
+                              {n.content}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-3 hover:bg-gray-50 flex items-start gap-3 transition-colors cursor-pointer">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-medium text-gray-800">
+                            Chào mừng bạn đến với nền tảng SportLink!
+                          </p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            Khám phá sân bóng, chọn nhiều khung giờ vào giỏ đặt sân ngay hôm nay.
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-medium text-gray-800">
-                          Chào mừng bạn đến với nền tảng SportLink!
-                        </p>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          Khám phá sân bóng và kết nối cáp kèo thể thao ngay hôm nay.
-                        </p>
-                        <span className="text-[10px] text-gray-400 mt-1 block">5 phút trước</span>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -244,7 +319,7 @@ export default function PlayerNavbar() {
                   Đăng nhập
                 </Link>
                 <Link
-                  to="/login"
+                  to="/register"
                   className="px-3.5 py-1.5 text-xs font-bold bg-black text-white hover:bg-gray-800 rounded-xl transition shadow-xs"
                 >
                   Đăng ký
@@ -314,6 +389,16 @@ export default function PlayerNavbar() {
                     </div>
 
                   <div className="py-1">
+                    <Link
+                      to="/profile"
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors font-medium"
+                    >
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Hồ sơ cá nhân
+                    </Link>
+
                     <Link
                       to="/bookings"
                       className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"

@@ -125,9 +125,17 @@ export interface CourtAvailabilityResponse {
   }[];
 }
 
+export interface SlotBreakdownItem {
+  slot: string;
+  hourlyRate: number;
+  slotPrice: number;
+  isPeak: boolean;
+}
+
 export interface BookingQuoteResponse {
   courtId: number;
   courtName: string;
+  facilityId?: number | null;
   facilityName: string;
   sportName: string;
   bookingDate: string;
@@ -139,8 +147,27 @@ export interface BookingQuoteResponse {
   isHoliday: boolean;
   totalPrice: number;
   depositSuggested: number;
+  slotBreakdown?: SlotBreakdownItem[];
+  courtStatus?: string;
   isAvailable: boolean;
   conflictReason: string | null;
+}
+
+export interface CartQuoteItemResponse extends BookingQuoteResponse {
+  cartIndex: number;
+  cartItemId: string;
+}
+
+export interface BookingCartQuoteResponse {
+  totalItems: number;
+  availableCount: number;
+  conflictCount: number;
+  allAvailable: boolean;
+  totalDurationHours: number;
+  totalCartPrice: number;
+  totalAvailablePrice: number;
+  totalDepositSuggested: number;
+  items: CartQuoteItemResponse[];
 }
 
 export interface VietQrPayload {
@@ -307,9 +334,71 @@ export async function getBookingQuoteApi(params: {
   return res.data.data;
 }
 
-export async function getMyBookingsApi(): Promise<PlayerBookingItem[]> {
-  const res = await api.get('/bookings');
+export async function getMyBookingsApi(params?: {
+  status?: string;
+  paymentStatus?: string;
+  facilityId?: string;
+  courtId?: string;
+  sportId?: string;
+  startDate?: string;
+  endDate?: string;
+  keyword?: string;
+}): Promise<PlayerBookingItem[]> {
+  const res = await api.get('/bookings', { params });
   return res.data.data || [];
+}
+
+export const getPlayerBookingsApi = getMyBookingsApi;
+export const getOwnerBookingsListApi = getMyBookingsApi;
+
+export async function getBookingCartQuoteApi(
+  items: {
+    cartItemId?: string;
+    courtId: number;
+    bookingDate: string;
+    startTime: string;
+    endTime: string;
+  }[]
+): Promise<BookingCartQuoteResponse> {
+  const res = await api.post('/bookings/cart/quote', { items });
+  return res.data.data;
+}
+
+export async function checkoutBookingCartApi(payload: {
+  items: {
+    courtId: number;
+    bookingDate: string;
+    startTime: string;
+    endTime: string;
+  }[];
+  paymentMethod?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+}): Promise<{
+  success: boolean;
+  message: string;
+  data: {
+    totalBookings: number;
+    totalPrice: number;
+    firstBookingId: number | null;
+    bookings: PlayerBookingItem[];
+  };
+}> {
+  const res = await api.post('/bookings/cart/checkout', payload);
+  return res.data;
+}
+
+export async function rejectOnlineBookingApi(
+  bookingId: number,
+  reason: string
+): Promise<{
+  success: boolean;
+  message: string;
+  data: PlayerBookingItem;
+}> {
+  const res = await api.post(`/bookings/${bookingId}/reject`, { reason });
+  return res.data;
 }
 
 export async function getBookingByIdApi(bookingId: number): Promise<PlayerBookingItem> {

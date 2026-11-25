@@ -3,8 +3,95 @@ import { AppError } from '../../core/errors/AppError.js';
 
 export async function register(req, res, next) {
   try {
-    const user = await authService.register(req.body);
-    res.status(201).json({ success: true, data: user });
+    const result = await authService.register(req.body);
+    res.status(201).json({
+      success: true,
+      message: 'Đăng ký tài khoản người chơi thành công.',
+      token: result.token,
+      data: result.user,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function forgotPassword(req, res, next) {
+  try {
+    const result = await authService.forgotPassword(req.body);
+    res.json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function verifyResetOtp(req, res, next) {
+  try {
+    const result = await authService.verifyResetOtp(req.body);
+    res.json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPassword(req, res, next) {
+  try {
+    const result = await authService.resetPassword(req.body);
+    res.json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateProfile(req, res, next) {
+  try {
+    const updatedUser = await authService.updateProfile(req.user.id, req.body);
+    res.json({
+      success: true,
+      message: 'Cập nhật hồ sơ cá nhân thành công.',
+      data: updatedUser,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function changePassword(req, res, next) {
+  try {
+    const result = await authService.changePassword(req.user.id, req.body);
+    res.json({
+      success: true,
+      message: result.message,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getNotifications(req, res, next) {
+  try {
+    const data = await authService.getUserNotifications(req.user.id);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function markNotificationsRead(req, res, next) {
+  try {
+    await authService.markNotificationsRead(req.user.id);
+    res.json({ success: true, message: 'Đã đánh dấu đọc tất cả thông báo.' });
   } catch (err) {
     next(err);
   }

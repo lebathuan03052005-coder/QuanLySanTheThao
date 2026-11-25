@@ -120,13 +120,32 @@ export async function updateCourtInFacility(req, res, next) {
   }
 }
 
+export async function getAffectedBookingsForCourt(req, res, next) {
+  try {
+    const ownerId = req.user.id;
+    const courtId = parseInt(req.params.courtId);
+    const data = await facilityService.getAffectedBookingsForCourt(courtId, ownerId, req.query);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function updateCourtStatus(req, res, next) {
   try {
     const ownerId = req.user.id;
     const courtId = parseInt(req.params.courtId);
-    const { status } = req.body;
-    const updated = await facilityService.updateCourtStatus(courtId, ownerId, status);
-    res.json({ success: true, data: updated });
+    const { status, reason, notifyPlayers, cancelAffected } = req.body;
+    const updated = await facilityService.updateCourtStatus(courtId, ownerId, status, {
+      reason,
+      notifyPlayers,
+      cancelAffected,
+    });
+    res.json({
+      success: true,
+      message: updated.warningMessage || 'Đã cập nhật trạng thái sân thành công.',
+      data: updated,
+    });
   } catch (err) {
     next(err);
   }
