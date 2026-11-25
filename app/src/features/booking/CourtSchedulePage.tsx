@@ -180,9 +180,7 @@ const STATUS_BADGE: Record<
 
 export default function CourtSchedulePage() {
   const { user } = useAuthStore();
-  const isOwnerOrAdmin =
-    (user?.role || '').toLowerCase() === 'owner' ||
-    (user?.role || '').toLowerCase() === 'admin';
+  const isOwner = (user?.role || '').toLowerCase() === 'owner';
 
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [selectedDate, setSelectedDate] = useState<string>(() =>
@@ -502,7 +500,7 @@ export default function CourtSchedulePage() {
   }
 
   async function handleDeleteMaintenance(m: ScheduleMaintenance) {
-    if (!isOwnerOrAdmin) return;
+    if (!isOwner) return;
     if (
       !window.confirm(
         `Mở khóa bảo trì sân "${m.courtName}" (${m.startTime} - ${m.endTime})?`
@@ -627,7 +625,7 @@ export default function CourtSchedulePage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {isOwnerOrAdmin && (
+          {isOwner && (
             <button
               type="button"
               onClick={() => {
@@ -1043,12 +1041,12 @@ export default function CourtSchedulePage() {
                           colSpan={span}
                           onClick={() => handleDeleteMaintenance(matchedMaint)}
                           title={
-                            isOwnerOrAdmin
+                            isOwner
                               ? 'Bấm để mở khóa bảo trì'
                               : matchedMaint.reason
                           }
                           className={`p-1.5 border-r border-b border-slate-200/80 align-top ${
-                            isOwnerOrAdmin ? 'cursor-pointer' : ''
+                            isOwner ? 'cursor-pointer' : ''
                           }`}
                         >
                           <div className="h-full min-h-[76px] rounded-2xl p-2.5 bg-slate-100 border border-slate-300 text-slate-600 flex flex-col justify-between hover:bg-slate-200/70 transition-colors">
@@ -1788,7 +1786,7 @@ export default function CourtSchedulePage() {
       )}
 
       {/* ======================== MODAL 3: KHÓA BẢO TRÌ SÂN ======================== */}
-      {isMaintModalOpen && isOwnerOrAdmin && (
+      {isMaintModalOpen && isOwner && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">

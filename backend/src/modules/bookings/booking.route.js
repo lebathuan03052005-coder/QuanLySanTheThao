@@ -22,11 +22,11 @@ const router = Router();
 router.use(verifyToken, checkAccountStatus);
 
 // [3.1] Lịch hoạt động sân theo Ngày / Tuần / Tháng dành cho Owner & Staff
-router.get('/schedule', authorize('owner', 'staff', 'admin'), getSchedule);
+router.get('/schedule', authorize('owner', 'staff'), getSchedule);
 
-// Quản lý lịch bảo trì sân (chỉ Owner và Admin)
-router.post('/maintenances', authorize('owner', 'admin'), createMaintenance);
-router.delete('/maintenances/:id', authorize('owner', 'admin'), deleteMaintenance);
+// Quản lý lịch bảo trì sân (chỉ Owner)
+router.post('/maintenances', authorize('owner'), createMaintenance);
+router.delete('/maintenances/:id', authorize('owner'), deleteMaintenance);
 
 // Danh sách & tạo mới đơn đặt sân
 router.get('/', getBookings);

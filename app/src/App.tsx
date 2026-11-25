@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import LoginPage from "./features/auth/LoginPage";
 import PlayerLayout from "./shared/layouts/PlayerLayout";
 import OwnerLayout from "./shared/layouts/OwnerLayout";
+import PlayerHomePage from "./features/home/PlayerHomePage";
+import CourtListPage from "./features/courts/CourtListPage";
+import FacilityDetailPage from "./features/facilities/FacilityDetailPage";
 import MatchListPage from "./features/matches/MatchListPage";
 import StaffManagementPage from "./features/staff/StaffManagementPage";
 import FacilityManagementPage from "./features/facilities/FacilityManagementPage";
@@ -13,12 +16,6 @@ import OccupancyAnalyticsPage from "./features/analytics/OccupancyAnalyticsPage"
 import { useAuthStore } from "./shared/stores/authStore";
 
 function PlayerRouteGuard() {
-  const { user, token } = useAuthStore();
-  if (!token || !user) return <Navigate to="/login" replace />;
-  const role = (user.role || "").toLowerCase();
-  if (role === "owner") return <Navigate to="/owner/bookings" replace />;
-  if (role === "staff") return <Navigate to="/staff/bookings" replace />;
-  if (role === "admin") return <Navigate to="/admin" replace />;
   return <PlayerLayout />;
 }
 
@@ -27,7 +24,7 @@ function OwnerRouteGuard() {
   if (!token || !user) return <Navigate to="/login" replace />;
   const role = (user.role || "").toLowerCase();
   if (role === "staff") return <Navigate to="/staff/bookings" replace />;
-  if (role !== "owner" && role !== "admin") return <Navigate to="/" replace />;
+  if (role !== "owner") return <Navigate to="/" replace />;
   return <OwnerLayout />;
 }
 
@@ -36,37 +33,8 @@ function StaffRouteGuard() {
   if (!token || !user) return <Navigate to="/login" replace />;
   const role = (user.role || "").toLowerCase();
   if (role === "owner") return <Navigate to="/owner/bookings" replace />;
-  if (role !== "staff" && role !== "admin") return <Navigate to="/" replace />;
+  if (role !== "staff") return <Navigate to="/" replace />;
   return <OwnerLayout />;
-}
-
-function AdminPlaceholder() {
-  const { user, logout } = useAuthStore();
-  return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-4xl mx-auto bg-white p-6 rounded-xl shadow border border-gray-200">
-        <div className="flex items-center justify-between pb-4 border-b border-gray-200">
-          <div>
-            <span className="inline-block px-2.5 py-1 text-xs font-semibold bg-purple-100 text-purple-700 rounded-full mb-1">
-              Quản trị viên
-            </span>
-            <h1 className="text-2xl font-bold text-gray-800">
-              Khu vực Quản trị Hệ thống (Admin)
-            </h1>
-          </div>
-          <button
-            onClick={logout}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-          >
-            Đăng xuất
-          </button>
-        </div>
-        <p className="mt-4 text-gray-600">
-          Xin chào, <strong>{user?.fullName}</strong> ({user?.email})
-        </p>
-      </div>
-    </div>
-  );
 }
 
 export default function App() {
@@ -77,20 +45,12 @@ export default function App() {
 
         {/* Route dành cho Player / Người dùng thông thường */}
         <Route path="/" element={<PlayerRouteGuard />}>
-          <Route index element={<MatchListPage />} />
+          <Route index element={<PlayerHomePage />} />
+          <Route path="facilities/:id" element={<FacilityDetailPage />} />
+          <Route path="courts" element={<CourtListPage />} />
+          <Route path="bookings" element={<div className="p-8 text-center text-gray-500">Khu vực lịch đặt sân của tôi</div>} />
           <Route path="matches" element={<MatchListPage />} />
-          <Route
-            path="courts"
-            element={
-              <div className="p-4 text-gray-600">Khu vực danh sách sân</div>
-            }
-          />
-          <Route
-            path="bookings"
-            element={
-              <div className="p-4 text-gray-600">Khu vực lịch đặt sân</div>
-            }
-          />
+          <Route path="news" element={<div className="p-8 text-center text-gray-500">Khu vực tin tức thể thao SportLink</div>} />
         </Route>
 
         {/* Route dành cho Owner / Chủ sân (Khớp với các mục trên Sidebar) */}
@@ -149,8 +109,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/staff/bookings" replace />} />
         </Route>
 
-        {/* Route dành cho Admin */}
-        <Route path="/admin" element={<AdminPlaceholder />} />
 
         {/* Điều hướng mặc định */}
         <Route path="*" element={<Navigate to="/login" replace />} />

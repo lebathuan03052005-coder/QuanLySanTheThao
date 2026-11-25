@@ -52,7 +52,7 @@ async function runTc04() {
   const emptyOwnerId = 999991; // Chủ sân giả định chưa có bất kỳ sân nào
 
   // 1. TC04-1: Chặn STAFF và PLAYER truy cập API Dashboard Doanh thu & Tỷ lệ lấp đầy
-  const ownerOnlyGuard = authorize('owner', 'admin');
+  const ownerOnlyGuard = authorize('owner');
   const staffRes = await runMiddleware(ownerOnlyGuard, {
     user: { id: 100, role: 'STAFF' },
   });

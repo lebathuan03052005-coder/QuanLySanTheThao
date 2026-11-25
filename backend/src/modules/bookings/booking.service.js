@@ -149,24 +149,6 @@ export async function getBookingsByUser(user) {
   const pool = await getPool();
   const userRole = (user.role || '').toLowerCase();
 
-  if (userRole === 'admin') {
-    const result = await pool.request().query(`
-      SELECT b.booking_id, b.court_id, b.user_id, b.customer_id, b.booking_date, b.start_time, b.end_time,
-             b.total_price, b.deposit_amount, b.status, b.created_at,
-             c.court_name, c.address AS court_address, c.facility_id, f.name AS facility_name,
-             COALESCE(cust.full_name, u.full_name, N'Khách vãng lai') AS player_name,
-             COALESCE(cust.email, u.email, '') AS player_email,
-             COALESCE(cust.phone, u.phone, '') AS player_phone
-      FROM bookings b
-      LEFT JOIN courts c ON b.court_id = c.court_id
-      LEFT JOIN facilities f ON c.facility_id = f.facility_id
-      LEFT JOIN customers cust ON b.customer_id = cust.customer_id
-      LEFT JOIN users u ON b.user_id = u.user_id
-      ORDER BY b.booking_date DESC, b.start_time ASC
-    `);
-    return result.recordset;
-  }
-
   if (userRole === 'owner') {
     const result = await pool
       .request()
@@ -254,7 +236,7 @@ export async function getScheduleData(user, query = {}) {
     ORDER BY sport_id ASC
   `);
 
-  // 2. Lấy danh sách các sân thuộc quyền quản lý của Owner / Staff / Admin (Strict Scoping)
+  // 2. Lấy danh sách các sân thuộc quyền quản lý của Owner / Staff (Strict Scoping)
   const courtReq = pool.request();
   let courtSql = `
     SELECT c.court_id, c.facility_id, c.owner_id, c.sport_id, c.court_name, c.address, c.status, c.utilities,
@@ -663,7 +645,7 @@ export async function createBooking(data, actorUser = null) {
 
   // Người chơi đặt online mặc định là PENDING; Owner/Staff đặt tại quầy có thể chọn CONFIRMED / CHECKED-IN
   let cleanStatus = 'PENDING';
-  if (actorRole === 'owner' || actorRole === 'staff' || actorRole === 'admin') {
+  if (actorRole === 'owner' || actorRole === 'staff') {
     const requestedStatus = (status || 'CONFIRMED').toUpperCase();
     cleanStatus = ['PENDING', 'CONFIRMED', 'CHECKED-IN'].includes(requestedStatus)
       ? requestedStatus

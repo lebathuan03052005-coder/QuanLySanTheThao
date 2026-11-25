@@ -2,6 +2,8 @@
 
 Nền tảng đặt sân và cáp kèo thể thao.
 
+> 📖 **Xem tài liệu hướng dẫn chạy chi tiết tại:** [HUONG_DAN_CHAY.md](./HUONG_DAN_CHAY.md)
+
 ---
 
 ## Yêu cầu cài đặt trước
@@ -102,10 +104,10 @@ Frontend sẽ chạy tại: `http://localhost:5173`
 
 ## 4. Kiểm tra kết nối Database & Danh sách Tài khoản Kiểm thử (WBS 3.1)
 
-Sau khi cấu hình `.env` xong, chạy lệnh sau trong thư mục `backend` để xác nhận kết nối thành công:
+Sau khi cấu hình `.env` xong, chạy lệnh sau trong thư mục `backend` để kiểm tra kết nối và đồng bộ cấu trúc bảng:
 
 ```bash
-node test-db.js
+npm run db:migrate
 ```
 
 ### 📌 Chú thích 3 Tài khoản Chủ sân (`OWNER`) dùng để Test Quản lý Cơ sở, Sân con & Môn thể thao

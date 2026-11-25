@@ -11,8 +11,8 @@ import { verifyToken, authorize } from '../../core/middlewares/auth.js';
 
 const router = Router();
 
-// Tất cả các route quản lý nhân viên yêu cầu xác thực vai trò Owner hoặc Admin
-router.use(verifyToken, authorize('owner', 'admin'));
+// Tất cả các route quản lý nhân viên yêu cầu xác thực vai trò Owner
+router.use(verifyToken, authorize('owner'));
 
 router.get('/courts', getOwnerCourts);
 router.get('/', getStaffList);

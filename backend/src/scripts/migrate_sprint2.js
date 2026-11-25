@@ -32,7 +32,7 @@ export async function runSprint2Migration() {
       );
     END
 
-    -- Đồng bộ ràng buộc role cho [users] (hỗ trợ đầy đủ ADMIN, OWNER, STAFF, PLAYER cả hoa lẫn thường)
+    -- Đồng bộ ràng buộc role cho [users] (chỉ OWNER, STAFF, PLAYER cả hoa lẫn thường)
     DECLARE @userRoleChk NVARCHAR(256) = (
       SELECT TOP 1 name FROM sys.check_constraints 
       WHERE parent_object_id = OBJECT_ID('dbo.users')
@@ -42,8 +42,9 @@ export async function runSprint2Migration() {
     BEGIN
       EXEC('ALTER TABLE [dbo].[users] DROP CONSTRAINT [' + @userRoleChk + ']');
     END
+    UPDATE [dbo].[users] SET [role] = 'OWNER' WHERE UPPER([role]) = 'ADMIN';
     ALTER TABLE [dbo].[users] WITH CHECK ADD CONSTRAINT [chk_users_role] 
-      CHECK ([role] IN ('PLAYER', 'STAFF', 'OWNER', 'ADMIN', 'player', 'staff', 'owner', 'admin'));
+      CHECK ([role] IN ('PLAYER', 'STAFF', 'OWNER', 'player', 'staff', 'owner'));
   `);
 
   // 1. Đồng bộ các cột mở rộng của bảng [users] và bảng [court_staff]
@@ -97,6 +98,20 @@ export async function runSprint2Migration() {
         [updated_at] DATETIME DEFAULT GETDATE(),
         CONSTRAINT [fk_facilities_owner] FOREIGN KEY ([owner_id]) REFERENCES [dbo].[users]([user_id])
       );
+    END
+
+    -- Đảm bảo bảng facilities có các cột lat, lng, images cho bản đồ và hiển thị
+    IF COL_LENGTH('dbo.facilities', 'lat') IS NULL
+    BEGIN
+      ALTER TABLE [dbo].[facilities] ADD [lat] FLOAT NULL, [lng] FLOAT NULL;
+    END
+    IF COL_LENGTH('dbo.facilities', 'images') IS NULL
+    BEGIN
+      ALTER TABLE [dbo].[facilities] ADD [images] NVARCHAR(MAX) NULL;
+    END
+    ELSE
+    BEGIN
+      ALTER TABLE [dbo].[facilities] ALTER COLUMN [images] NVARCHAR(MAX);
     END
   `);
 
