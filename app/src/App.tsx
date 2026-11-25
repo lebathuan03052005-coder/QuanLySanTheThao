@@ -15,6 +15,7 @@ import CustomerManagementPage from "./features/customers/CustomerManagementPage"
 import RevenueDashboardPage from "./features/analytics/RevenueDashboardPage";
 import OccupancyAnalyticsPage from "./features/analytics/OccupancyAnalyticsPage";
 import { useAuthStore } from "./shared/stores/authStore";
+import NotificationToast from "./shared/components/NotificationToast";
 
 function PlayerRouteGuard() {
   return <PlayerLayout />;
@@ -41,6 +42,7 @@ function StaffRouteGuard() {
 export default function App() {
   return (
     <BrowserRouter>
+      <NotificationToast />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
 
@@ -51,6 +53,7 @@ export default function App() {
           <Route path="courts" element={<CourtListPage />} />
           <Route path="bookings" element={<PlayerBookingsPage />} />
           <Route path="matches" element={<MatchListPage />} />
+          <Route path="matches/:id" element={<MatchListPage />} />
           <Route path="news" element={<div className="p-8 text-center text-gray-500">Khu vực tin tức thể thao SportLink</div>} />
         </Route>
 

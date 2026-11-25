@@ -332,11 +332,36 @@ export async function runSprint2Migration() {
       CREATE TABLE [dbo].[notifications] (
         [notification_id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         [user_id] INT NOT NULL,
-        [title] NVARCHAR(200) NOT NULL,
-        [content] NVARCHAR(500) NOT NULL,
+        [title] NVARCHAR(255) NOT NULL,
+        [content] NVARCHAR(MAX) NOT NULL,
+        [type] VARCHAR(30) NOT NULL DEFAULT 'SYSTEM',
+        [link] NVARCHAR(255) NULL,
         [is_read] BIT NULL DEFAULT 0,
         [created_at] DATETIME DEFAULT GETDATE()
       );
+    END
+
+    IF EXISTS (SELECT * FROM sys.tables WHERE name = 'notifications')
+    BEGIN
+      IF COL_LENGTH('dbo.notifications', 'type') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[notifications] ADD [type] VARCHAR(30) NOT NULL DEFAULT 'SYSTEM';
+      END
+
+      IF COL_LENGTH('dbo.notifications', 'link') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[notifications] ADD [link] NVARCHAR(255) NULL;
+      END
+
+      IF NOT EXISTS (
+        SELECT * FROM sys.indexes
+        WHERE name = 'IX_notifications_user_created'
+          AND object_id = OBJECT_ID(N'[dbo].[notifications]')
+      )
+      BEGIN
+        CREATE NONCLUSTERED INDEX [IX_notifications_user_created]
+        ON [dbo].[notifications] ([user_id] ASC, [is_read] ASC, [created_at] DESC);
+      END
     END
 
     IF EXISTS (SELECT * FROM sys.tables WHERE name = 'bookings')
@@ -366,6 +391,12 @@ export async function runSprint2Migration() {
         ALTER TABLE [dbo].[bookings] ADD [refund_amount] DECIMAL(18,2) NOT NULL DEFAULT 0;
       END
 
+      -- [Giữ chỗ 10 phút] Hạn giữ chỗ của đơn HOLD chờ thanh toán
+      IF COL_LENGTH('dbo.bookings', 'hold_expires_at') IS NULL
+      BEGIN
+        ALTER TABLE [dbo].[bookings] ADD [hold_expires_at] DATETIME NULL;
+      END
+
       IF COL_LENGTH('dbo.bookings', 'updated_at') IS NULL
       BEGIN
         ALTER TABLE [dbo].[bookings] ADD [updated_at] DATETIME NULL DEFAULT GETDATE();
@@ -381,6 +412,32 @@ export async function runSprint2Migration() {
         ON [dbo].[bookings] ([court_id] ASC, [booking_date] ASC, [start_time] ASC, [end_time] ASC)
         INCLUDE ([status]);
       END
+
+      IF NOT EXISTS (
+        SELECT * FROM sys.indexes
+        WHERE name = 'IX_bookings_status_hold_expires'
+          AND object_id = OBJECT_ID(N'[dbo].[bookings]')
+      )
+      BEGIN
+        CREATE NONCLUSTERED INDEX [IX_bookings_status_hold_expires]
+        ON [dbo].[bookings] ([status] ASC, [hold_expires_at] ASC);
+      END
+
+      -- [Giữ chỗ 10 phút] Mở rộng CHECK constraint trạng thái để cho phép HOLD & EXPIRED
+      DECLARE @dropStatusChecks NVARCHAR(MAX) = N'';
+      SELECT @dropStatusChecks = @dropStatusChecks
+        + N'ALTER TABLE [dbo].[bookings] DROP CONSTRAINT [' + cc.name + N'];'
+      FROM sys.check_constraints cc
+      WHERE cc.parent_object_id = OBJECT_ID(N'[dbo].[bookings]')
+        AND cc.definition LIKE N'%status%';
+
+      IF @dropStatusChecks <> N''
+      BEGIN
+        EXEC sp_executesql @dropStatusChecks;
+      END
+
+      ALTER TABLE [dbo].[bookings] WITH CHECK ADD CONSTRAINT [CK_bookings_status]
+      CHECK ([status] IN ('HOLD', 'PENDING', 'CONFIRMED', 'CHECKED-IN', 'COMPLETED', 'CANCELLED', 'NO-SHOW', 'EXPIRED'));
     END
 
     IF EXISTS (SELECT * FROM sys.tables WHERE name = 'transactions')

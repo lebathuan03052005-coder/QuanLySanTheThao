@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import {
   getMyBookingsApi,
   cancelBookingWithRefundApi,
@@ -11,6 +11,7 @@ import { formatCurrency } from '../../shared/utils/format';
 
 const STATUS_TABS = [
   { key: 'ALL', label: 'Tất cả đơn' },
+  { key: 'HOLD', label: 'Đang giữ chỗ' },
   { key: 'PENDING', label: 'Chờ xác nhận' },
   { key: 'CONFIRMED', label: 'Đã xác nhận' },
   { key: 'CHECKED-IN', label: 'Đang chơi' },
@@ -28,6 +29,16 @@ const CANCEL_PRESETS = [
 function getStatusBadge(status: string) {
   const s = (status || 'PENDING').toUpperCase();
   switch (s) {
+    case 'HOLD':
+      return {
+        label: '⏳ Đang giữ chỗ (10 phút)',
+        cls: 'bg-amber-50 text-amber-800 border-amber-300',
+      };
+    case 'EXPIRED':
+      return {
+        label: '⌛ Hết hạn giữ chỗ',
+        cls: 'bg-gray-100 text-gray-600 border-gray-300',
+      };
     case 'CONFIRMED':
       return {
         label: '✓ Đã xác nhận sân',
@@ -90,11 +101,14 @@ function getPaymentBadge(paymentStatus: string, method?: string | null) {
 
 export default function PlayerBookingsPage() {
   const { user, token } = useAuthStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const targetBookingId = Number(searchParams.get('bookingId') || 0);
 
   const [bookings, setBookings] = useState<PlayerBookingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+  const [highlightedBookingId, setHighlightedBookingId] = useState<number | null>(null);
 
   // Bộ lọc
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -137,6 +151,39 @@ export default function PlayerBookingsPage() {
     loadBookings();
   }, [token]);
 
+  // Tự động cuộn và làm nổi bật đơn đặt sân khi đi từ thông báo (?bookingId=...)
+  useEffect(() => {
+    if (!targetBookingId || loading || bookings.length === 0) return;
+
+    const found = bookings.find((b) => b.booking_id === targetBookingId);
+    if (!found) return;
+
+    setStatusFilter('ALL');
+    setSportFilter('ALL');
+    setDateFilter('');
+    setSearchKeyword('');
+    setHighlightedBookingId(targetBookingId);
+
+    const scrollTimer = window.setTimeout(() => {
+      const el = document.getElementById(`booking-card-${targetBookingId}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+
+    // Xóa param trên URL để tránh mở/cuộn lại khi reload thủ công, giữ highlight trong 7s
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('bookingId');
+    setSearchParams(nextParams, { replace: true });
+
+    const clearTimer = window.setTimeout(() => {
+      setHighlightedBookingId((cur) => (cur === targetBookingId ? null : cur));
+    }, 7000);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [targetBookingId, loading, bookings]);
+
   // Danh sách các môn thể thao có trong lịch sử đặt
   const availableSports = useMemo(() => {
     const set = new Set<string>();
@@ -173,7 +220,7 @@ export default function PlayerBookingsPage() {
   const kpiStats = useMemo(() => {
     const totalCount = bookings.length;
     const activeUpcomingCount = bookings.filter((b) =>
-      ['PENDING', 'CONFIRMED', 'CHECKED-IN'].includes((b.status || '').toUpperCase())
+      ['HOLD', 'PENDING', 'CONFIRMED', 'CHECKED-IN'].includes((b.status || '').toUpperCase())
     ).length;
     const totalSpent = bookings.reduce(
       (sum, b) => sum + Math.max(0, Number(b.paid_amount || 0) - Number(b.refunded_amount || 0)),
@@ -189,7 +236,7 @@ export default function PlayerBookingsPage() {
   // Kiểm tra đơn có thể hủy bởi người chơi không
   function canCancelBooking(b: PlayerBookingItem) {
     const s = (b.status || '').toUpperCase();
-    if (!['PENDING', 'CONFIRMED'].includes(s)) return false;
+    if (!['HOLD', 'PENDING', 'CONFIRMED'].includes(s)) return false;
     const slotStart = new Date(`${b.booking_date}T${b.start_time}:00`);
     return slotStart.getTime() > Date.now();
   }
@@ -478,17 +525,28 @@ export default function PlayerBookingsPage() {
               booking.payment_status,
               booking.payment_method
             );
-            const isCancelled = (booking.status || '').toUpperCase() === 'CANCELLED';
+            const bookingStatus = (booking.status || '').toUpperCase();
+            const isCancelled = bookingStatus === 'CANCELLED';
+            const holdStillActive =
+              bookingStatus !== 'HOLD' || Number(booking.hold_seconds_remaining ?? 1) > 0;
             const canPay =
               !isCancelled &&
-              ['PENDING', 'CONFIRMED'].includes((booking.status || '').toUpperCase()) &&
+              ['HOLD', 'PENDING', 'CONFIRMED'].includes(bookingStatus) &&
+              holdStillActive &&
               Number(booking.remaining_amount || 0) > 0;
             const canCancel = canCancelBooking(booking);
 
+            const isHighlighted = highlightedBookingId === booking.booking_id;
+
             return (
               <div
+                id={`booking-card-${booking.booking_id}`}
                 key={booking.booking_id}
-                className="bg-white rounded-3xl p-5 sm:p-6 border border-gray-100 shadow-xs hover:shadow-md transition space-y-4"
+                className={`bg-white rounded-3xl p-5 sm:p-6 border shadow-xs hover:shadow-md transition-all space-y-4 ${
+                  isHighlighted
+                    ? 'border-blue-500 ring-4 ring-blue-500/20 shadow-lg bg-blue-50/15'
+                    : 'border-gray-100'
+                }`}
               >
                 {/* Top row: Mã đơn + Badges */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-gray-100">
@@ -555,6 +613,15 @@ export default function PlayerBookingsPage() {
                         ⏰ Khung giờ: {booking.start_time} – {booking.end_time}
                       </span>
                     </div>
+
+                    {bookingStatus === 'HOLD' && holdStillActive && (
+                      <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 inline-block">
+                        ⏳ Đang giữ chỗ — còn khoảng{' '}
+                        {Math.max(1, Math.ceil(Number(booking.hold_seconds_remaining || 0) / 60))} phút
+                        để thanh toán. Trả cọc 30% hoặc 100% là khoá lịch ngay, không cần chủ sân xác
+                        nhận. Quá hạn, khung giờ sẽ tự động mở lại cho người khác.
+                      </p>
+                    )}
 
                     {isCancelled && booking.cancel_reason && (
                       <div className="mt-2 p-2.5 rounded-xl bg-red-50/70 border border-red-100 text-xs text-red-700">

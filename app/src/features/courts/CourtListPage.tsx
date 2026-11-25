@@ -205,7 +205,9 @@ export default function CourtListPage() {
           initialTab: bookingPaymentChoice,
         });
       } else {
-        setBookingSuccessMsg(`Đặt sân "${bookingCourt.court_name}" thành công!`);
+        setBookingSuccessMsg(
+          `Đã giữ chỗ sân "${bookingCourt.court_name}" (#SPL-${createdId || ''}) trong 10 phút. Trả cọc 30% hoặc 100% tại "Lịch đặt của tôi" để khoá lịch ngay (không cần chủ sân xác nhận)!`
+        );
         setTimeout(() => {
           setBookingCourt(null);
           setBookingSuccessMsg(null);
@@ -500,6 +502,12 @@ export default function CourtListPage() {
                 )}
               </div>
 
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 leading-relaxed">
+                <strong className="block mb-0.5">🔒 Trả 30% hoặc 100% để khoá lịch ngay</strong>
+                Thanh toán xong là khung giờ được chốt, <strong>không cần chủ sân xác nhận</strong>.
+                Chọn trả sau thì chỉ được giữ chỗ 10 phút.
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
                   Phương thức thanh toán:
@@ -547,7 +555,7 @@ export default function CourtListPage() {
                         : 'border-gray-200 text-gray-600'
                     }`}
                   >
-                    ⏳ Đặt giữ chỗ trước
+                    ⏳ Giữ chỗ 10 phút, trả sau
                   </button>
                 </div>
               </div>
