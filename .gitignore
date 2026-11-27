@@ -5,7 +5,7 @@ dist/
 dulieu/
 backend/uploads/*
 !backend/uploads/**/.gitkeep
-.freebuff
+.freebuff/
 
 *.tsbuildinfo
 tsconfig.tsbuildinfo

@@ -4,6 +4,8 @@ import { useAuthStore } from "../stores/authStore";
 import { uploadAvatarApi } from "../../features/auth/auth.api";
 import ImageCropModal from "./ImageCropModal";
 import ImageViewerModal from "./ImageViewerModal";
+import { useNotificationStore } from "../stores/notificationStore";
+import NotificationPanel from "./NotificationPanel";
 
 interface NavItem {
   to: string;
@@ -13,10 +15,12 @@ interface NavItem {
 
 export default function OwnerSidebar() {
   const { user, logout, updateUserAvatar } = useAuthStore();
+  const { unreadCount, loadNotifications } = useNotificationStore();
   const navigate = useNavigate();
 
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
@@ -27,9 +31,10 @@ export default function OwnerSidebar() {
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const notifMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Đóng menu người dùng khi click ra ngoài
+  // Đóng menu người dùng & thông báo khi click ra ngoài
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -37,6 +42,12 @@ export default function OwnerSidebar() {
         !userMenuRef.current.contains(event.target as Node)
       ) {
         setShowUserMenu(false);
+      }
+      if (
+        notifMenuRef.current &&
+        !notifMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowNotifMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -549,8 +560,68 @@ export default function OwnerSidebar() {
           </nav>
         </div>
 
-        {/* 3. Menu phụ (Cài đặt & Hỗ trợ) */}
+        {/* 3. Menu phụ (Thông báo, Cài đặt & Hỗ trợ) */}
         <div className="flex flex-col gap-1 pt-4 border-t border-slate-800/80">
+          {/* Nút Thông báo cho Owner / Staff */}
+          <div className="relative" ref={notifMenuRef}>
+            <button
+              type="button"
+              title={isCollapsed ? "Thông báo" : undefined}
+              onClick={() => {
+                const nextOpen = !showNotifMenu;
+                setShowNotifMenu(nextOpen);
+                setShowUserMenu(false);
+                if (nextOpen) {
+                  loadNotifications();
+                }
+              }}
+              className={`
+                w-full group relative flex items-center gap-3.5 px-3.5 py-2.5 rounded-2xl text-sm font-medium transition-all duration-200 cursor-pointer
+                ${
+                  showNotifMenu
+                    ? "bg-[#2c2e40] text-white shadow-md"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-[#282a3c]/60"
+                }
+                ${isCollapsed ? "justify-center px-0" : "justify-between"}
+              `}
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="relative">
+                  <svg
+                    className="w-5 h-5 shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeWidth={1.8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                    />
+                  </svg>
+                  {isCollapsed && unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 border border-[#202230]" />
+                  )}
+                </div>
+                {!isCollapsed && <span className="truncate">Thông báo</span>}
+              </div>
+              {!isCollapsed && unreadCount > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-red-500 text-white">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifMenu && (
+              <NotificationPanel
+                variant="dark"
+                onClose={() => setShowNotifMenu(false)}
+                className="absolute bottom-0 left-full ml-3 w-80 sm:w-96 z-50"
+              />
+            )}
+          </div>
+
           <nav className="flex flex-col gap-1.5">
             {bottomNavItems.map((item) => (
               <NavLink

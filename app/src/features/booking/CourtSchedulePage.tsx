@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router';
+import api from '../../shared/lib/axios';
 import {
   fetchScheduleApi,
   createWalkInBookingApi,
@@ -134,6 +136,20 @@ const STATUS_BADGE: Record<
   string,
   { label: string; bg: string; text: string; border: string; dot: string }
 > = {
+  HOLD: {
+    label: 'Đang giữ chỗ',
+    bg: 'bg-amber-50',
+    text: 'text-amber-800',
+    border: 'border-amber-400 border-dashed',
+    dot: 'bg-amber-500',
+  },
+  EXPIRED: {
+    label: 'Hết hạn giữ chỗ',
+    bg: 'bg-gray-50',
+    text: 'text-gray-500',
+    border: 'border-gray-200',
+    dot: 'bg-gray-400',
+  },
   CONFIRMED: {
     label: 'Đã xác nhận',
     bg: 'bg-blue-50',
@@ -181,10 +197,13 @@ const STATUS_BADGE: Record<
 export default function CourtSchedulePage() {
   const { user } = useAuthStore();
   const isOwner = (user?.role || '').toLowerCase() === 'owner';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const targetBookingId = Number(searchParams.get('bookingId') || 0);
+  const targetDate = searchParams.get('date') || '';
 
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [selectedDate, setSelectedDate] = useState<string>(() =>
-    formatDateIso(new Date())
+    targetDate && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : formatDateIso(new Date())
   );
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>('ALL');
   const [selectedSportId, setSelectedSportId] = useState<string>('ALL');
@@ -291,6 +310,54 @@ export default function CourtSchedulePage() {
     selectedCourtId,
     selectedStatus,
   ]);
+
+  // Đồng bộ ngày & bộ lọc khi đi từ thông báo (?bookingId=...&date=...)
+  useEffect(() => {
+    if (!targetBookingId) return;
+    setViewMode('day');
+    setSelectedFacilityId('ALL');
+    setSelectedSportId('ALL');
+    setSelectedCourtId('ALL');
+    setSelectedStatus('ALL');
+
+    if (targetDate && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+      if (selectedDate !== targetDate) {
+        setSelectedDate(targetDate);
+      }
+      return;
+    }
+
+    // Fallback cho thông báo cũ chưa có param date: tra ngày của đơn đặt sân
+    api
+      .get(`/bookings/${targetBookingId}`)
+      .then((res) => {
+        const bDate = res.data?.data?.booking_date;
+        if (bDate && /^\d{4}-\d{2}-\d{2}$/.test(String(bDate))) {
+          setSelectedDate(String(bDate));
+        }
+      })
+      .catch(() => {
+        // Bỏ qua nếu không tìm thấy đơn
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetBookingId, targetDate]);
+
+  // Mở modal chi tiết đơn đặt sân ngay khi lịch chứa bookingId mục tiêu tải xong
+  useEffect(() => {
+    if (!targetBookingId || loading) return;
+    const hasValidTargetDate = /^\d{4}-\d{2}-\d{2}$/.test(targetDate);
+    if (hasValidTargetDate && selectedDate !== targetDate) return;
+
+    const matched = scheduleData.bookings.find((b) => b.bookingId === targetBookingId);
+    if (matched) {
+      setActiveBooking(matched);
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('bookingId');
+      nextParams.delete('date');
+      setSearchParams(nextParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetBookingId, targetDate, selectedDate, loading, scheduleData.bookings]);
 
   function showToast(msg: string) {
     setToastMsg(msg);

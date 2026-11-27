@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
+import NotificationPanel from './NotificationPanel';
 
 export default function PlayerNavbar() {
   const { user, logout } = useAuthStore();
+  const { unreadCount, loadNotifications } = useNotificationStore();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(1);
   const [avatarError, setAvatarError] = useState(false);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -172,14 +174,18 @@ export default function PlayerNavbar() {
 
           {/* 3. Khu vực Thao tác bên phải (Thông báo, Tài khoản & Hamburger) */}
           <div className="flex items-center gap-3">
-            {/* Nút Chuông thông báo có Badge số 1 màu đỏ */}
+            {/* Nút Chuông thông báo */}
             <div className="relative" ref={notifMenuRef}>
               <button
                 onClick={() => {
-                  setShowNotificationMenu(!showNotificationMenu);
+                  const nextOpen = !showNotificationMenu;
+                  setShowNotificationMenu(nextOpen);
                   setShowUserMenu(false);
+                  if (nextOpen && user) {
+                    loadNotifications();
+                  }
                 }}
-                className="relative p-2 text-gray-700 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none"
+                className="relative p-2 text-gray-700 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none cursor-pointer"
                 title="Thông báo"
                 aria-label="Thông báo"
               >
@@ -191,46 +197,38 @@ export default function PlayerNavbar() {
                     d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
                   />
                 </svg>
-                {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-xs">
-                    {unreadCount}
+                {user && unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-xs">
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </button>
 
               {/* Dropdown Menu Thông báo */}
               {showNotificationMenu && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-100 py-3 z-50">
-                  <div className="flex items-center justify-between px-4 pb-2 border-b border-gray-100">
-                    <span className="font-semibold text-sm text-gray-900">Thông báo mới</span>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={() => setUnreadCount(0)}
-                        className="text-xs text-blue-600 hover:underline font-medium"
-                      >
-                        Đánh dấu đã đọc
-                      </button>
-                    )}
+                user ? (
+                  <NotificationPanel
+                    variant="light"
+                    onClose={() => setShowNotificationMenu(false)}
+                    className="absolute right-0 mt-2 w-80 sm:w-96 z-50"
+                  />
+                ) : (
+                  <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-gray-100 p-4 z-50 text-center">
+                    <p className="text-xs font-semibold text-gray-800">
+                      Đăng nhập để nhận thông báo
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Theo dõi trạng thái đặt sân, thanh toán và lời mời cáp kèo ngay lập tức.
+                    </p>
+                    <Link
+                      to="/login"
+                      onClick={() => setShowNotificationMenu(false)}
+                      className="inline-block mt-3 px-4 py-1.5 text-xs font-bold bg-black text-white rounded-xl hover:bg-gray-800 transition"
+                    >
+                      Đăng nhập ngay
+                    </Link>
                   </div>
-                  <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
-                    <div className="p-3 hover:bg-gray-50 flex items-start gap-3 transition-colors cursor-pointer">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-medium text-gray-800">
-                          Chào mừng bạn đến với nền tảng SportLink!
-                        </p>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          Khám phá sân bóng và kết nối cáp kèo thể thao ngay hôm nay.
-                        </p>
-                        <span className="text-[10px] text-gray-400 mt-1 block">5 phút trước</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                )
               )}
             </div>
 

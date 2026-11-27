@@ -3,11 +3,18 @@ import api from '../../shared/lib/axios';
 export interface Match {
   id: number;
   hostId: number;
-  courtId: number;
+  hostName?: string | null;
+  courtId: number | null;
+  courtName?: string | null;
   sport: string;
   matchDate: string;
+  endTime?: string | null;
   slots: number;
-  status: 'open' | 'full' | 'cancelled';
+  maxPlayers?: number;
+  currentPlayers?: number;
+  level?: string | null;
+  estimatedCostPerPerson?: number | null;
+  status: 'open' | 'full' | 'cancelled' | string;
 }
 
 /**

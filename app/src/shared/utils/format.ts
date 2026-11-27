@@ -35,3 +35,20 @@ export function formatDate(date: string | Date, includeTime = true): string {
 export function calcDurationHours(start: string, end: string): number {
   return (new Date(end).getTime() - new Date(start).getTime()) / 3_600_000;
 }
+
+/**
+ * Định dạng thời gian tương đối thân thiện cho thông báo (VD: "Vừa xong", "5 phút trước").
+ */
+export function formatNotificationTime(secondsAgo?: number, fallbackDate?: string | Date): string {
+  if (typeof secondsAgo === 'number' && !Number.isNaN(secondsAgo)) {
+    const s = Math.max(0, Math.floor(secondsAgo));
+    if (s < 60) return 'Vừa xong';
+    const mins = Math.floor(s / 60);
+    if (mins < 60) return `${mins} phút trước`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} giờ trước`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} ngày trước`;
+  }
+  return fallbackDate ? formatDate(fallbackDate, true) : '';
+}

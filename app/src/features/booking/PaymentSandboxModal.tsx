@@ -8,6 +8,9 @@ import {
 } from './booking.api';
 import { formatCurrency } from '../../shared/utils/format';
 
+/** Thời gian giữ chỗ mặc định (10 phút) — đồng bộ với HOLD_DURATION_MINUTES ở backend */
+const DEFAULT_HOLD_SECONDS = 600;
+
 interface PaymentSandboxModalProps {
   isOpen: boolean;
   bookingId: number;
@@ -123,17 +126,37 @@ export default function PaymentSandboxModal({
   const [qrImgError, setQrImgError] = useState(false);
   const [bankRefCode, setBankRefCode] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(900);
+  const [remainingSeconds, setRemainingSeconds] = useState(DEFAULT_HOLD_SECONDS);
+  const [isHeldBooking, setIsHeldBooking] = useState(true);
 
-  // Đồng hồ đếm ngược 15 phút giữ chỗ thanh toán
+  // Mở modal cho một đơn mới -> đặt lại thời gian giữ chỗ mặc định
+  useEffect(() => {
+    if (!isOpen) return;
+    setIsHeldBooking(true);
+    setRemainingSeconds(DEFAULT_HOLD_SECONDS);
+  }, [isOpen, bookingId]);
+
+  // Đồng bộ đếm ngược theo hạn giữ chỗ server trả về (không reset khi đổi tab thanh toán)
+  useEffect(() => {
+    if (!session) return;
+    const serverSeconds = session.holdSecondsRemaining;
+    if (serverSeconds === null || serverSeconds === undefined) {
+      // Đơn đã xác nhận / không còn ở trạng thái giữ chỗ
+      setIsHeldBooking(false);
+      return;
+    }
+    setIsHeldBooking(true);
+    setRemainingSeconds(Math.max(0, Math.floor(Number(serverSeconds))));
+  }, [session]);
+
+  // Đồng hồ đếm ngược thời gian giữ chỗ 10 phút
   useEffect(() => {
     if (!isOpen || paymentCompleted) return;
-    setCountdown(900);
-    const timer = setInterval(() => {
-      setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    const timer = window.setInterval(() => {
+      setRemainingSeconds((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
-    return () => clearInterval(timer);
-  }, [isOpen, activeTab, paymentCompleted]);
+    return () => window.clearInterval(timer);
+  }, [isOpen, paymentCompleted]);
 
   // Khởi tạo phiên thanh toán mỗi khi mở modal hoặc đổi phương thức / loại thanh toán
   useEffect(() => {
@@ -178,8 +201,9 @@ export default function PaymentSandboxModal({
       ? Math.round(totalPrice * 0.3)
       : remainingTotal);
 
-  const minutesLeft = String(Math.floor(countdown / 60)).padStart(2, '0');
-  const secondsLeft = String(countdown % 60).padStart(2, '0');
+  const minutesLeft = String(Math.floor(remainingSeconds / 60)).padStart(2, '0');
+  const secondsLeft = String(remainingSeconds % 60).padStart(2, '0');
+  const holdExpired = isHeldBooking && remainingSeconds <= 0;
 
   function handleCopy(text: string, label: string) {
     navigator.clipboard?.writeText(text).catch(() => {});
@@ -190,6 +214,10 @@ export default function PaymentSandboxModal({
   // [S3-08] Giả lập Callback Webhook Thành công (Mã 00) từ Cổng Sandbox
   async function handleSimulateSandboxSuccess() {
     if (!session) return;
+    if (holdExpired) {
+      setErrorMsg('Thời gian giữ chỗ đã hết. Vui lòng đóng cửa sổ và chọn lại khung giờ để đặt sân.');
+      return;
+    }
     setProcessingWebhook(true);
     setErrorMsg(null);
     setSecurityAlertMsg(null);
@@ -198,9 +226,21 @@ export default function PaymentSandboxModal({
     try {
       const payload = session.sandboxGateway.webhookPayloads.success;
       const res = await triggerSandboxWebhookApi(payload as unknown as Record<string, unknown>);
+      const result = res.data;
+
+      // Tiền về sau khi hết hạn giữ chỗ & khung giờ đã bị người khác đặt -> server hoàn tiền, không xác nhận
+      if (result?.status === 'REFUNDED' || result?.booking?.status === 'EXPIRED') {
+        setErrorMsg(
+          result?.message ||
+            'Thanh toán về sau khi giữ chỗ đã hết hạn và khung giờ đã có người đặt. Hệ thống đã hoàn tiền 100% cho bạn.'
+        );
+        onPaymentSuccess();
+        return;
+      }
+
       setPaymentCompleted({
         orderCode: payload.orderCode,
-        gatewayTransId: res.data?.gatewayTransId || payload.gatewayTransId,
+        gatewayTransId: result?.gatewayTransId || payload.gatewayTransId,
         amount: payload.amount,
         method: activeTab,
       });
@@ -216,6 +256,10 @@ export default function PaymentSandboxModal({
   // [S3-08 & S3-09] Giả lập Lỗi Cổng Sandbox / Hủy giao dịch (Mã 24) -> Gợi ý chuyển sang VietQR Dự phòng (Rủi ro R2)
   async function handleSimulateSandboxFailure() {
     if (!session) return;
+    if (holdExpired) {
+      setErrorMsg('Thời gian giữ chỗ đã hết. Vui lòng đóng cửa sổ và chọn lại khung giờ để đặt sân.');
+      return;
+    }
     setProcessingWebhook(true);
     setErrorMsg(null);
     setSecurityAlertMsg(null);
@@ -264,6 +308,10 @@ export default function PaymentSandboxModal({
 
   // [S3-09] Xác nhận thanh toán qua phương án dự phòng VietQR Napas 247
   async function handleConfirmVietQr() {
+    if (holdExpired) {
+      setErrorMsg('Thời gian giữ chỗ đã hết. Vui lòng đóng cửa sổ và chọn lại khung giờ để đặt sân.');
+      return;
+    }
     setProcessingWebhook(true);
     setErrorMsg(null);
     setSecurityAlertMsg(null);
@@ -274,6 +322,17 @@ export default function PaymentSandboxModal({
         bankRefCode: bankRefCode.trim() || `NAPAS247-${Date.now()}`,
         amount: currentAmount,
       });
+
+      const result = res.data;
+      if (result?.status === 'REFUNDED' || result?.booking?.status === 'EXPIRED') {
+        setErrorMsg(
+          result?.message ||
+            'Thanh toán về sau khi giữ chỗ đã hết hạn và khung giờ đã có người đặt. Hệ thống đã hoàn tiền 100% cho bạn.'
+        );
+        onPaymentSuccess();
+        return;
+      }
+
       setPaymentCompleted({
         orderCode: res.data?.orderCode || session?.orderCode || `VIETQR-SPL${bookingId}`,
         gatewayTransId: res.data?.gatewayTransId || bankRefCode.trim() || 'VIETQR-NAPAS247',
@@ -373,6 +432,14 @@ export default function PaymentSandboxModal({
           </div>
         ) : (
           <div className="mt-4 space-y-4">
+            {/* Thông báo: trả 30% hoặc 100% là khoá lịch ngay, không cần chủ sân xác nhận */}
+            {paidAmount === 0 && (
+              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 leading-relaxed">
+                <strong>🔒 Trả 30% hoặc 100% để khoá lịch ngay</strong> — không cần chủ sân xác nhận.
+                Thanh toán xong đơn chuyển sang “Đã xác nhận”; nếu cọc 30% thì phần còn lại thanh toán tại sân.
+              </div>
+            )}
+
             {/* Bước 1: Chọn mức thanh toán (100% hoặc Đặt cọc 30%) */}
             {paidAmount === 0 && (
               <div className="grid grid-cols-2 gap-3">
@@ -395,7 +462,7 @@ export default function PaymentSandboxModal({
                     {formatCurrency(totalPrice)}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-0.5">
-                    Xác nhận sân ngay lập tức, không cần thanh toán thêm tại quầy
+                    Khoá lịch ngay khi trả đủ 100%, không cần chủ sân xác nhận
                   </p>
                 </button>
 
@@ -418,7 +485,7 @@ export default function PaymentSandboxModal({
                     {formatCurrency(Math.round(totalPrice * 0.3))}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-0.5">
-                    Còn lại {formatCurrency(totalPrice - Math.round(totalPrice * 0.3))} thanh toán tại sân
+                    Khoá lịch ngay bằng cọc 30%; còn lại {formatCurrency(totalPrice - Math.round(totalPrice * 0.3))} trả tại sân
                   </p>
                 </button>
               </div>
@@ -430,9 +497,21 @@ export default function PaymentSandboxModal({
                 <label className="text-xs font-bold text-gray-700">
                   Chọn phương thức thanh toán:
                 </label>
-                <span className="text-xs font-mono font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200">
-                  ⏱ Giữ chỗ: {minutesLeft}:{secondsLeft}
-                </span>
+                {isHeldBooking ? (
+                  <span
+                    className={`text-xs font-mono font-semibold px-2.5 py-0.5 rounded-lg border ${
+                      holdExpired || remainingSeconds <= 60
+                        ? 'text-red-700 bg-red-50 border-red-200'
+                        : 'text-amber-700 bg-amber-50 border-amber-200'
+                    }`}
+                  >
+                    ⏱ Giữ chỗ: {minutesLeft}:{secondsLeft}
+                  </span>
+                ) : (
+                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200">
+                    ✓ Đơn đã xác nhận
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-2.5">
@@ -523,6 +602,16 @@ export default function PaymentSandboxModal({
             {securityAlertMsg && (
               <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-medium">
                 {securityAlertMsg}
+              </div>
+            )}
+
+            {holdExpired && (
+              <div className="p-3.5 rounded-2xl bg-red-50 border border-red-300 text-red-700 text-xs space-y-1">
+                <p className="font-bold">⏰ Đã hết 10 phút giữ chỗ</p>
+                <p>
+                  Khung giờ này đã được tự động mở lại cho người khác đặt. Vui lòng đóng cửa sổ
+                  và chọn lại khung giờ để đặt sân.
+                </p>
               </div>
             )}
 
@@ -657,7 +746,7 @@ export default function PaymentSandboxModal({
 
                     <button
                       type="button"
-                      disabled={processingWebhook}
+                      disabled={processingWebhook || holdExpired}
                       onClick={handleConfirmVietQr}
                       className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition disabled:opacity-50 cursor-pointer"
                     >
@@ -725,7 +814,7 @@ export default function PaymentSandboxModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button
                       type="button"
-                      disabled={processingWebhook || !session}
+                      disabled={processingWebhook || !session || holdExpired}
                       onClick={handleSimulateSandboxSuccess}
                       className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                     >
@@ -735,7 +824,7 @@ export default function PaymentSandboxModal({
 
                     <button
                       type="button"
-                      disabled={processingWebhook || !session}
+                      disabled={processingWebhook || !session || holdExpired}
                       onClick={handleSimulateSandboxFailure}
                       className="py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                     >
@@ -747,7 +836,7 @@ export default function PaymentSandboxModal({
                   <div className="pt-1 flex items-center justify-between">
                     <button
                       type="button"
-                      disabled={processingWebhook || !session}
+                      disabled={processingWebhook || !session || holdExpired}
                       onClick={handleSimulateForgedSignature}
                       className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
                     >
