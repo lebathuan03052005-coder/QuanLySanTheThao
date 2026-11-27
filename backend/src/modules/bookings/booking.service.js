@@ -1,6 +1,24 @@
 import crypto from 'crypto';
 import sql, { getPool } from '../../core/config/db.js';
 import { AppError } from '../../core/errors/AppError.js';
+import {
+  createNotificationSafe,
+  createNotificationsForUsers,
+  getCourtManagementRecipientIds,
+} from '../notifications/notification.service.js';
+
+/**
+ * [Giữ chỗ 10 phút] Thời gian giữ chỗ mặc định cho đơn đặt sân online trước khi thanh toán.
+ */
+export const HOLD_DURATION_MINUTES = 10;
+export const HOLD_DURATION_SECONDS = HOLD_DURATION_MINUTES * 60;
+
+/**
+ * Điều kiện SQL xác định một booking còn chiếm khung giờ của sân.
+ * HOLD chỉ chặn khi còn hạn; CANCELLED / NO-SHOW / EXPIRED đã giải phóng khung giờ.
+ */
+export const BLOCKING_BOOKING_CONDITION = `status IN ('HOLD', 'PENDING', 'CONFIRMED', 'CHECKED-IN', 'COMPLETED')
+        AND (status <> 'HOLD' OR hold_expires_at IS NULL OR hold_expires_at > GETDATE())`;
 
 /**
  * Lấy chuỗi ngày hiện tại theo giờ địa phương "YYYY-MM-DD".
@@ -39,6 +57,75 @@ export function formatDateStr(val) {
     return `${y}-${m}-${d}`;
   }
   return String(val).slice(0, 10);
+}
+
+/**
+ * [Giữ chỗ 10 phút] Tự động chuyển các đơn HOLD đã quá hạn sang EXPIRED để giải phóng khung giờ.
+ * Có thể lọc theo booking / sân / ngày / khoảng ngày / người dùng.
+ * Hàm được gọi lazily ở các API xem lịch, tạo đơn, thanh toán và hủy đơn nên không cần cron riêng.
+ * @returns {Promise<Array<{ booking_id: number, user_id: number | null }>>}
+ */
+export async function expireStaleHolds(poolOrNull = null, filter = {}) {
+  try {
+    const pool = poolOrNull || (await getPool());
+    const request = pool.request();
+    const where = [
+      "status = 'HOLD'",
+      'hold_expires_at IS NOT NULL',
+      'hold_expires_at <= GETDATE()',
+    ];
+
+    if (filter.bookingId) {
+      request.input('bookingId', sql.Int, Number(filter.bookingId));
+      where.push('booking_id = @bookingId');
+    }
+    if (filter.courtId) {
+      request.input('courtId', sql.Int, Number(filter.courtId));
+      where.push('court_id = @courtId');
+    }
+    if (filter.bookingDate) {
+      request.input('bookingDate', sql.VarChar(10), String(filter.bookingDate).slice(0, 10));
+      where.push('booking_date = @bookingDate');
+    }
+    if (filter.startDate && filter.endDate) {
+      request.input('startDate', sql.VarChar(10), String(filter.startDate).slice(0, 10));
+      request.input('endDate', sql.VarChar(10), String(filter.endDate).slice(0, 10));
+      where.push('booking_date >= @startDate AND booking_date <= @endDate');
+    }
+    if (filter.userId) {
+      request.input('userId', sql.Int, Number(filter.userId));
+      where.push('user_id = @userId');
+    }
+
+    const result = await request.query(`
+      UPDATE bookings
+      SET status = 'EXPIRED',
+          hold_expires_at = NULL,
+          updated_at = GETDATE()
+      OUTPUT DELETED.booking_id, DELETED.user_id, DELETED.court_id,
+             DELETED.booking_date, DELETED.start_time, DELETED.end_time
+      WHERE ${where.join(' AND ')}
+    `);
+
+    for (const row of result.recordset) {
+      if (!row.user_id) continue;
+      await createNotificationSafe(pool, {
+        userId: row.user_id,
+        type: 'BOOKING',
+        link: `/bookings?bookingId=${row.booking_id}`,
+        title: `Hết hạn giữ chỗ đơn #SPL-${row.booking_id}`,
+        content: `Thời gian giữ chỗ ${HOLD_DURATION_MINUTES} phút cho khung ${formatTimeStr(
+          row.start_time
+        )} - ${formatTimeStr(row.end_time)} ngày ${formatDateStr(
+          row.booking_date
+        )} đã hết. Khung giờ đã được mở lại cho người khác đặt.`,
+      });
+    }
+
+    return result.recordset;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -114,26 +201,6 @@ export function verifyPaymentSignature({
     return crypto.timingSafeEqual(a, b);
   } catch {
     return false;
-  }
-}
-
-/**
- * Ghi nhận thông báo hệ thống (in-app notification) an toàn, không làm gián đoạn luồng chính.
- */
-async function createNotificationSafe(pool, { userId, title, content }) {
-  if (!userId) return;
-  try {
-    await pool
-      .request()
-      .input('userId', userId)
-      .input('title', String(title || 'Thông báo hệ thống').slice(0, 200))
-      .input('content', String(content || '').slice(0, 500))
-      .query(`
-        INSERT INTO notifications (user_id, title, content, is_read, created_at)
-        VALUES (@userId, @title, @content, 0, GETDATE())
-      `);
-  } catch {
-    // Bỏ qua nếu bảng notifications chưa đồng bộ
   }
 }
 
@@ -262,6 +329,10 @@ export async function getCourtAvailability(query = {}) {
   const date = query.date || query.bookingDate || getLocalDateStr();
 
   const pool = await getPool();
+
+  // Giải phóng các lượt giữ chỗ đã hết hạn trước khi trả về lịch trống
+  await expireStaleHolds(pool, { courtId, bookingDate: date });
+
   const courtRes = await pool
     .request()
     .input('courtId', courtId)
@@ -299,7 +370,7 @@ export async function getCourtAvailability(query = {}) {
       FROM bookings
       WHERE court_id = @courtId
         AND booking_date = @bookingDate
-        AND status NOT IN ('CANCELLED', 'NO-SHOW')
+        AND ${BLOCKING_BOOKING_CONDITION}
       ORDER BY start_time ASC
     `);
 
@@ -614,6 +685,11 @@ export async function getBookingsByUser(user, filters = {}) {
   const pool = await getPool();
   const userRole = (user.role || '').toLowerCase();
 
+  // Chuyển các lượt giữ chỗ quá hạn của người dùng sang EXPIRED trước khi hiển thị
+  if (userRole === 'player') {
+    await expireStaleHolds(pool, { userId: user.id });
+  }
+
   let bookingsRecordset = [];
 
   if (userRole === 'owner') {
@@ -674,6 +750,13 @@ export async function getBookingsByUser(user, filters = {}) {
         SELECT b.booking_id, b.court_id, b.user_id, b.customer_id, b.booking_date, b.start_time, b.end_time,
                b.total_price, b.deposit_amount, b.status, b.created_at,
                b.payment_status, b.payment_method, b.cancel_reason, b.cancelled_at, b.refund_amount,
+               b.hold_expires_at,
+               CASE
+                 WHEN b.status = 'HOLD' AND b.hold_expires_at IS NOT NULL
+                      AND DATEDIFF(SECOND, GETDATE(), b.hold_expires_at) > 0
+                   THEN DATEDIFF(SECOND, GETDATE(), b.hold_expires_at)
+                 ELSE NULL
+               END AS hold_seconds_remaining,
                c.court_name, COALESCE(c.address, f.address) AS court_address, c.facility_id, c.images AS court_images,
                c.sport_id, s.sport_name,
                f.name AS facility_name, f.address AS facility_address, f.phone AS facility_phone
@@ -826,6 +909,9 @@ export async function getScheduleData(user, query = {}) {
   const statusFilter =
     query.status && query.status !== 'ALL' ? query.status.toUpperCase() : null;
 
+  // Giải phóng các lượt giữ chỗ quá hạn trong khoảng ngày đang xem
+  await expireStaleHolds(pool, { startDate, endDate });
+
   // 1. Lấy danh sách các môn thể thao
   const sportsResult = await pool.request().query(`
     SELECT sport_id, sport_name, description
@@ -959,6 +1045,13 @@ export async function getScheduleData(user, query = {}) {
     SELECT b.booking_id, b.court_id, b.user_id, b.customer_id,
            b.booking_date, b.start_time, b.end_time,
            b.total_price, b.deposit_amount, b.status, b.created_at,
+           b.hold_expires_at,
+           CASE
+             WHEN b.status = 'HOLD' AND b.hold_expires_at IS NOT NULL
+                  AND DATEDIFF(SECOND, GETDATE(), b.hold_expires_at) > 0
+               THEN DATEDIFF(SECOND, GETDATE(), b.hold_expires_at)
+             ELSE NULL
+           END AS hold_seconds_remaining,
            c.court_name, c.facility_id, f.name AS facility_name, c.sport_id, s.sport_name,
            COALESCE(cust.full_name, u.full_name, N'Khách vãng lai') AS player_name,
            COALESCE(cust.phone, u.phone, '') AS player_phone,
@@ -1038,6 +1131,10 @@ export async function getScheduleData(user, query = {}) {
       totalPrice: Number(b.total_price || 0),
       depositAmount: Number(b.deposit_amount || 0),
       status: (b.status || 'PENDING').toUpperCase(),
+      holdSecondsRemaining:
+        b.hold_seconds_remaining === null || b.hold_seconds_remaining === undefined
+          ? null
+          : Number(b.hold_seconds_remaining),
       createdAt: b.created_at,
     })),
     maintenances: maintResult.recordset.map((m) => ({
@@ -1066,6 +1163,13 @@ export async function getBookingById(bookingId) {
       SELECT b.booking_id, b.court_id, b.user_id, b.customer_id, b.booking_date, b.start_time, b.end_time,
              b.total_price, b.deposit_amount, b.status, b.created_at,
              b.payment_status, b.payment_method, b.cancel_reason, b.cancelled_at, b.refund_amount,
+             b.hold_expires_at,
+             CASE
+               WHEN b.status = 'HOLD' AND b.hold_expires_at IS NOT NULL
+                    AND DATEDIFF(SECOND, GETDATE(), b.hold_expires_at) > 0
+                 THEN DATEDIFF(SECOND, GETDATE(), b.hold_expires_at)
+               ELSE NULL
+             END AS hold_seconds_remaining,
              c.court_name, COALESCE(c.address, f.address) AS court_address, c.owner_id, c.facility_id,
              c.sport_id, s.sport_name, f.name AS facility_name, f.phone AS facility_phone,
              COALESCE(cust.full_name, u.full_name, N'Khách vãng lai') AS player_name,
@@ -1102,6 +1206,10 @@ export async function getBookingById(bookingId) {
     total_price: Number(booking.total_price || 0),
     deposit_amount: Number(booking.deposit_amount || 0),
     refund_amount: Number(booking.refund_amount || 0),
+    holdSecondsRemaining:
+      booking.hold_seconds_remaining === null || booking.hold_seconds_remaining === undefined
+        ? null
+        : Number(booking.hold_seconds_remaining),
     transactions: txRes.recordset.map((tx) => ({
       ...tx,
       amount: Number(tx.amount || 0),
@@ -1174,6 +1282,9 @@ export async function createBooking(data, actorUser = null) {
 
   const pool = await getPool();
   const actorRole = (actorUser?.role || '').toLowerCase();
+
+  // Giải phóng các lượt giữ chỗ đã hết hạn của sân/ngày này trước khi kiểm tra trùng khung giờ
+  await expireStaleHolds(pool, { courtId: Number(courtId), bookingDate: cleanDate });
 
   // 1. Tra cứu / Lưu thông tin khách hàng trong bảng [customers] và kiểm tra trạng thái khóa (LOCKED)
   let targetCustomerId = null;
@@ -1390,7 +1501,7 @@ export async function createBooking(data, actorUser = null) {
           FROM bookings WITH (UPDLOCK, HOLDLOCK)
           WHERE court_id = @courtId
             AND booking_date = @bookingDate
-            AND status NOT IN ('CANCELLED', 'NO-SHOW')
+            AND ${BLOCKING_BOOKING_CONDITION}
             AND start_time < CAST(@endTime AS TIME)
             AND end_time > CAST(@startTime AS TIME)
         `);
@@ -1436,8 +1547,8 @@ export async function createBooking(data, actorUser = null) {
         isHoliday
       );
 
-      // Người chơi đặt online mặc định là PENDING; Owner/Staff đặt tại quầy có thể chọn CONFIRMED / CHECKED-IN
-      let cleanStatus = 'PENDING';
+      // Người chơi đặt online: giữ chỗ 10 phút (HOLD) chờ thanh toán; Owner/Staff đặt tại quầy chọn CONFIRMED / CHECKED-IN
+      let cleanStatus = 'HOLD';
       if (actorRole === 'owner' || actorRole === 'staff') {
         const requestedStatus = (status || 'CONFIRMED').toUpperCase();
         cleanStatus = ['PENDING', 'CONFIRMED', 'CHECKED-IN'].includes(requestedStatus)
@@ -1476,19 +1587,27 @@ export async function createBooking(data, actorUser = null) {
         .input('status', cleanStatus)
         .input('paymentStatus', initialPaymentStatus)
         .input('paymentMethod', cleanPaymentMethod)
+        .input('holdMinutes', sql.Int, HOLD_DURATION_MINUTES)
         .query(`
           INSERT INTO bookings (
             court_id, user_id, customer_id, booking_date, start_time, end_time,
-            total_price, deposit_amount, status, payment_status, payment_method, created_at, updated_at
+            total_price, deposit_amount, status, payment_status, payment_method,
+            hold_expires_at, created_at, updated_at
           )
           OUTPUT INSERTED.*
           VALUES (
             @courtId, @userId, @customerId, @bookingDate, CAST(@startTime AS TIME), CAST(@endTime AS TIME),
-            @totalPrice, @depositAmount, @status, @paymentStatus, @paymentMethod, GETDATE(), GETDATE()
+            @totalPrice, @depositAmount, @status, @paymentStatus, @paymentMethod,
+            CASE WHEN @status = 'HOLD' THEN DATEADD(MINUTE, @holdMinutes, GETDATE()) ELSE NULL END,
+            GETDATE(), GETDATE()
           )
         `);
 
       created = insertResult.recordset[0];
+      if (created) {
+        created.holdSecondsRemaining =
+          String(created.status || '').toUpperCase() === 'HOLD' ? HOLD_DURATION_SECONDS : null;
+      }
 
       // Ghi nhận giao dịch tiền cọc tại quầy nếu có
       if (finalDeposit > 0) {
@@ -1542,16 +1661,29 @@ export async function createBooking(data, actorUser = null) {
 
   // Ghi nhận thông báo hệ thống sau khi commit thành công
   if (created) {
+    const isHoldBooking = String(created.status || '').toUpperCase() === 'HOLD';
     if (targetUserId) {
       await createNotificationSafe(pool, {
         userId: targetUserId,
-        title: `Đặt sân #SPL-${created.booking_id} thành công`,
-        content: `Đơn đặt sân "${courtNameForNotif}" ngày ${cleanDate} (${cleanStart} - ${cleanEnd}) đã được tạo. Tổng tiền: ${Number(created.total_price).toLocaleString('vi-VN')}đ.`,
+        type: 'BOOKING',
+        link: `/bookings?bookingId=${created.booking_id}`,
+        title: isHoldBooking
+          ? `Đã giữ chỗ đơn #SPL-${created.booking_id} (${HOLD_DURATION_MINUTES} phút)`
+          : `Đặt sân #SPL-${created.booking_id} thành công`,
+        content: isHoldBooking
+          ? `Khung giờ ${cleanStart} - ${cleanEnd} ngày ${cleanDate} tại "${courtNameForNotif}" đang được giữ cho bạn trong ${HOLD_DURATION_MINUTES} phút. Bạn hãy trả cọc 30% hoặc 100% để khoá lịch ngay (không cần chủ sân xác nhận); quá hạn khung giờ sẽ tự động mở lại. Tổng tiền: ${Number(created.total_price).toLocaleString('vi-VN')}đ.`
+          : `Đơn đặt sân "${courtNameForNotif}" ngày ${cleanDate} (${cleanStart} - ${cleanEnd}) đã được tạo. Tổng tiền: ${Number(created.total_price).toLocaleString('vi-VN')}đ.`,
       });
     }
-    if (courtOwnerId && courtOwnerId !== targetUserId) {
-      await createNotificationSafe(pool, {
-        userId: courtOwnerId,
+    const mgmtIds = await getCourtManagementRecipientIds(pool, courtId, actorUser?.id);
+    if (courtOwnerId && courtOwnerId !== actorUser?.id && !mgmtIds.includes(courtOwnerId)) {
+      mgmtIds.push(courtOwnerId);
+    }
+    const filteredMgmtIds = mgmtIds.filter((uid) => uid !== targetUserId);
+    if (filteredMgmtIds.length > 0) {
+      await createNotificationsForUsers(pool, filteredMgmtIds, {
+        type: 'BOOKING',
+        link: `/owner/bookings?bookingId=${created.booking_id}&date=${cleanDate}`,
         title: `Có đơn đặt sân mới #SPL-${created.booking_id}`,
         content: `Sân "${courtNameForNotif}" có lịch đặt mới vào ${cleanStart} - ${cleanEnd} ngày ${cleanDate}.`,
       });
@@ -1601,7 +1733,7 @@ export function buildVietQrFallbackPayload({
     orderCode: orderCode || `VIETQR-SPL${bookingId}`,
     courtName,
     qrImageUrl,
-    expiresInSeconds: 900, // Giữ chỗ thanh toán 15 phút
+    expiresInSeconds: HOLD_DURATION_SECONDS, // Đồng bộ với thời gian giữ chỗ khi đặt sân
     instructions: [
       'Mở ứng dụng Ngân hàng bất kỳ (Vietcombank, MBBank, Techcombank, BIDV, MoMo, ZaloPay...)',
       'Chọn tính năng Quét mã QR (VietQR Napas 247)',
@@ -1626,6 +1758,23 @@ export async function initiateBookingPayment(bookingId, data = {}, actorUser = n
   }
 
   const currentStatus = (booking.status || 'PENDING').toUpperCase();
+
+  if (currentStatus === 'EXPIRED') {
+    throw new AppError(
+      'Đơn giữ chỗ đã hết hạn và khung giờ đã được mở lại. Vui lòng chọn lại khung giờ để đặt sân.',
+      409
+    );
+  }
+
+  // Đơn đang giữ chỗ nhưng đã quá 10 phút -> chuyển EXPIRED và từ chối thanh toán
+  if (currentStatus === 'HOLD' && Number(booking.holdSecondsRemaining || 0) <= 0) {
+    await expireStaleHolds(null, { bookingId: cleanBookingId });
+    throw new AppError(
+      `Thời gian giữ chỗ ${HOLD_DURATION_MINUTES} phút đã hết. Vui lòng chọn lại khung giờ để đặt sân.`,
+      409
+    );
+  }
+
   if (currentStatus === 'CANCELLED' || currentStatus === 'NO-SHOW') {
     throw new AppError(
       `Không thể thanh toán cho đơn đặt sân đã ở trạng thái ${currentStatus}.`,
@@ -1745,6 +1894,7 @@ export async function initiateBookingPayment(bookingId, data = {}, actorUser = n
     paymentType,
     paymentMethod,
     status: 'PENDING',
+    holdSecondsRemaining: booking.holdSecondsRemaining ?? null,
     sandboxGateway: {
       provider:
         paymentMethod === 'MOMO'
@@ -1891,64 +2041,174 @@ export async function processPaymentWebhook(payload = {}) {
 
       const netPaid = Math.max(0, Number(sumRes.recordset[0]?.net_paid || 0));
 
-      // 3. Cập nhật trạng thái đơn đặt sân (PENDING -> CONFIRMED) và trạng thái thanh toán
+      // 3. Cập nhật trạng thái đơn đặt sân & xử lý thanh toán về muộn
       const bkRes = await new sql.Request(transaction)
         .input('bookingId', Number(bookingId))
         .query(`
-          SELECT booking_id, total_price, status, user_id, court_id
+          SELECT booking_id, total_price, status, user_id, court_id,
+                 CONVERT(VARCHAR(10), booking_date, 23) AS booking_date_str,
+                 CONVERT(VARCHAR(8), start_time, 108) AS start_time_str,
+                 CONVERT(VARCHAR(8), end_time, 108) AS end_time_str,
+                 CASE
+                   WHEN hold_expires_at IS NOT NULL AND hold_expires_at <= GETDATE() THEN 1
+                   ELSE 0
+                 END AS hold_expired
           FROM bookings WITH (UPDLOCK, HOLDLOCK)
           WHERE booking_id = @bookingId
         `);
 
       const bk = bkRes.recordset[0];
+      let lateRefundAmount = 0;
+      let lateConflict = null;
+
       if (bk) {
         const totalPrice = Number(bk.total_price || 0);
         const newPayStatus = netPaid >= totalPrice && totalPrice > 0 ? 'PAID' : 'DEPOSIT_PAID';
         const currentBkStatus = (bk.status || 'PENDING').toUpperCase();
-        const nextBkStatus = currentBkStatus === 'PENDING' ? 'CONFIRMED' : currentBkStatus;
+        // Tiền về sau khi giữ chỗ đã hết hạn (EXPIRED, hoặc HOLD quá hạn chưa kịp dọn)
+        const isLatePayment =
+          currentBkStatus === 'EXPIRED' ||
+          (currentBkStatus === 'HOLD' && Number(bk.hold_expired) === 1);
 
-        await new sql.Request(transaction)
-          .input('bookingId', Number(bookingId))
-          .input('depositAmount', Math.min(totalPrice, netPaid))
-          .input('status', nextBkStatus)
-          .input('paymentStatus', newPayStatus)
-          .input('paymentMethod', String(paymentMethod).toUpperCase())
-          .query(`
-            UPDATE bookings
-            SET deposit_amount = @depositAmount,
-                status = @status,
-                payment_status = @paymentStatus,
-                payment_method = @paymentMethod,
-                updated_at = GETDATE()
-            WHERE booking_id = @bookingId
-          `);
+        if (isLatePayment) {
+          // Khóa range để kiểm tra khung giờ đã bị người khác đặt trong lúc giữ chỗ hết hạn
+          const conflictRes = await new sql.Request(transaction)
+            .input('courtId', sql.Int, Number(bk.court_id))
+            .input('bookingId', sql.Int, Number(bk.booking_id))
+            .input('bookingDate', sql.VarChar(10), String(bk.booking_date_str || '').slice(0, 10))
+            .input('startTime', sql.VarChar(8), String(bk.start_time_str || ''))
+            .input('endTime', sql.VarChar(8), String(bk.end_time_str || ''))
+            .query(`
+              SELECT TOP 1 booking_id, start_time, end_time, status
+              FROM bookings WITH (UPDLOCK, HOLDLOCK)
+              WHERE court_id = @courtId
+                AND booking_date = @bookingDate
+                AND booking_id <> @bookingId
+                AND ${BLOCKING_BOOKING_CONDITION}
+                AND start_time < CAST(@endTime AS TIME)
+                AND end_time > CAST(@startTime AS TIME)
+            `);
+          lateConflict = conflictRes.recordset[0] || null;
+        }
+
+        if (lateConflict) {
+          // Không còn khung giờ trống -> KHÔNG xác nhận đơn, hoàn tiền 100% ngay trong transaction
+          lateRefundAmount = netPaid;
+          const refundOrderCode = `RFD-LATE-SPL${bk.booking_id}-${Date.now()}`;
+
+          await new sql.Request(transaction)
+            .input('bookingId', bk.booking_id)
+            .input('userId', bk.user_id || null)
+            .input('amount', lateRefundAmount)
+            .input('method', String(paymentMethod).toUpperCase())
+            .input('orderCode', refundOrderCode)
+            .input(
+              'note',
+              `Hoàn tiền 100% do thanh toán về sau khi hết hạn giữ chỗ và khung giờ đã được đơn #${lateConflict.booking_id} đặt trước`
+            )
+            .query(`
+              INSERT INTO transactions (
+                booking_id, user_id, amount, transaction_type, payment_method,
+                status, order_code, gateway_trans_id, note, created_at, updated_at
+              )
+              VALUES (
+                @bookingId, @userId, @amount, 'REFUND', @method,
+                'SUCCESS', @orderCode, @orderCode, @note, GETDATE(), GETDATE()
+              )
+            `);
+
+          await new sql.Request(transaction)
+            .input('bookingId', bk.booking_id)
+            .input('refundAmount', lateRefundAmount)
+            .input('paymentMethod', String(paymentMethod).toUpperCase())
+            .query(`
+              UPDATE bookings
+              SET status = 'EXPIRED',
+                  payment_status = 'REFUNDED',
+                  payment_method = @paymentMethod,
+                  deposit_amount = @refundAmount,
+                  refund_amount = ISNULL(refund_amount, 0) + @refundAmount,
+                  cancel_reason = N'Hoàn tiền do thanh toán về sau khi hết hạn giữ chỗ và khung giờ đã có người đặt',
+                  cancelled_at = GETDATE(),
+                  hold_expires_at = NULL,
+                  updated_at = GETDATE()
+              WHERE booking_id = @bookingId
+            `);
+        } else {
+          // PENDING (đơn cũ), HOLD (còn hạn) hoặc EXPIRED (khung giờ vẫn trống) -> xác nhận đơn
+          const nextBkStatus = ['PENDING', 'HOLD', 'EXPIRED'].includes(currentBkStatus)
+            ? 'CONFIRMED'
+            : currentBkStatus;
+
+          await new sql.Request(transaction)
+            .input('bookingId', Number(bookingId))
+            .input('depositAmount', Math.min(totalPrice, netPaid))
+            .input('status', nextBkStatus)
+            .input('paymentStatus', newPayStatus)
+            .input('paymentMethod', String(paymentMethod).toUpperCase())
+            .query(`
+              UPDATE bookings
+              SET deposit_amount = @depositAmount,
+                  status = @status,
+                  payment_status = @paymentStatus,
+                  payment_method = @paymentMethod,
+                  hold_expires_at = NULL,
+                  updated_at = GETDATE()
+              WHERE booking_id = @bookingId
+            `);
+        }
       }
 
       await transaction.commit();
 
       const updatedBooking = await getBookingById(Number(bookingId));
+      const wasLateRefunded = lateRefundAmount > 0 && Boolean(lateConflict);
+
       if (updatedBooking?.user_id) {
         await createNotificationSafe(pool, {
           userId: updatedBooking.user_id,
-          title: `Thanh toán thành công đơn #SPL-${bookingId}`,
-          content: `Hệ thống đã nhận ${Number(amount).toLocaleString('vi-VN')}đ qua ${paymentMethod} (Mã GD: ${cleanGatewayId}). Lịch đặt sân "${updatedBooking.court_name}" đã được xác nhận!`,
+          type: 'PAYMENT',
+          link: `/bookings?bookingId=${bookingId}`,
+          title: wasLateRefunded
+            ? `Hoàn tiền đơn #SPL-${bookingId} do hết hạn giữ chỗ`
+            : `Thanh toán thành công đơn #SPL-${bookingId}`,
+          content: wasLateRefunded
+            ? `Hệ thống nhận ${Number(amount).toLocaleString('vi-VN')}đ sau khi giữ chỗ đã hết hạn và khung giờ đã được người khác đặt. Toàn bộ số tiền đã được hoàn 100% qua ${paymentMethod}. Vui lòng chọn khung giờ khác.`
+            : `Hệ thống đã nhận ${Number(amount).toLocaleString('vi-VN')}đ qua ${paymentMethod} (Mã GD: ${cleanGatewayId}). Lịch đặt sân "${updatedBooking.court_name}" đã được xác nhận!`,
         });
       }
-      if (updatedBooking?.owner_id) {
-        await createNotificationSafe(pool, {
-          userId: updatedBooking.owner_id,
-          title: `Khách đã thanh toán đơn #SPL-${bookingId}`,
-          content: `Đơn đặt sân "${updatedBooking.court_name}" đã thanh toán ${Number(amount).toLocaleString('vi-VN')}đ qua ${paymentMethod}.`,
-        });
+      const payMgmtIds = await getCourtManagementRecipientIds(pool, updatedBooking?.court_id);
+      if (updatedBooking?.owner_id && !payMgmtIds.includes(updatedBooking.owner_id)) {
+        payMgmtIds.push(updatedBooking.owner_id);
+      }
+      if (payMgmtIds.length > 0) {
+        await createNotificationsForUsers(
+          pool,
+          payMgmtIds.filter((uid) => uid !== updatedBooking?.user_id),
+          {
+            type: 'PAYMENT',
+            link: `/owner/bookings?bookingId=${bookingId}${updatedBooking?.booking_date ? `&date=${updatedBooking.booking_date}` : ''}`,
+            title: wasLateRefunded
+              ? `Đơn #SPL-${bookingId} thanh toán muộn – đã hoàn tiền`
+              : `Khách đã thanh toán đơn #SPL-${bookingId}`,
+            content: wasLateRefunded
+              ? `Khung giờ đã được đơn #${lateConflict.booking_id} đặt trước khi tiền về. Hệ thống đã tự động hoàn 100% (${lateRefundAmount.toLocaleString('vi-VN')}đ) cho khách, đơn được đóng ở trạng thái hết hạn.`
+              : `Đơn đặt sân "${updatedBooking.court_name}" đã thanh toán ${Number(amount).toLocaleString('vi-VN')}đ qua ${paymentMethod}.`,
+          }
+        );
       }
 
       return {
         idempotent: false,
-        status: 'SUCCESS',
-        message: 'Đối soát Webhook thanh toán thành công! Đơn đặt sân đã được xác nhận.',
+        status: wasLateRefunded ? 'REFUNDED' : 'SUCCESS',
+        message: wasLateRefunded
+          ? `Thanh toán về sau khi giữ chỗ đã hết hạn và khung giờ đã được người khác đặt. Hệ thống đã hoàn tiền 100% (${lateRefundAmount.toLocaleString('vi-VN')}đ) cho khách.`
+          : 'Đối soát Webhook thanh toán thành công! Đơn đặt sân đã được xác nhận.',
         orderCode,
         gatewayTransId: cleanGatewayId,
         bookingId: Number(bookingId),
+        refundAmount: wasLateRefunded ? lateRefundAmount : 0,
+        conflictingBookingId: wasLateRefunded ? lateConflict.booking_id : null,
         booking: updatedBooking,
       };
     } else {
@@ -2067,6 +2327,10 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
   }
 
   const pool = await getPool();
+
+  // Giữ chỗ quá hạn thì tự giải phóng trước khi xử lý hủy
+  await expireStaleHolds(pool, { bookingId: cleanId });
+
   const currentBooking = await getBookingById(cleanId);
   if (!currentBooking) {
     throw new AppError('Không tìm thấy đơn đặt sân.', 404);
@@ -2078,15 +2342,21 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
   if (currentStatus === 'CANCELLED') {
     throw new AppError('Đơn đặt sân này đã được hủy trước đó.', 400);
   }
+  if (currentStatus === 'EXPIRED') {
+    throw new AppError(
+      'Đơn giữ chỗ đã hết hạn, khung giờ đã được mở lại nên không cần hủy.',
+      400
+    );
+  }
   if (currentStatus === 'COMPLETED' || currentStatus === 'NO-SHOW') {
     throw new AppError(
       `Không thể hủy đơn đặt sân đã ở trạng thái "${currentStatus}".`,
       400
     );
   }
-  if (actorRole === 'player' && !['PENDING', 'CONFIRMED'].includes(currentStatus)) {
+  if (actorRole === 'player' && !['HOLD', 'PENDING', 'CONFIRMED'].includes(currentStatus)) {
     throw new AppError(
-      'Bạn chỉ có thể hủy đơn đặt sân khi đơn đang ở trạng thái Chờ xác nhận (PENDING) hoặc Đã xác nhận (CONFIRMED) trước giờ thi đấu.',
+      'Bạn chỉ có thể hủy đơn đặt sân khi đơn đang ở trạng thái Giữ chỗ (HOLD), Chờ xác nhận (PENDING) hoặc Đã xác nhận (CONFIRMED) trước giờ thi đấu.',
       403
     );
   }
@@ -2178,6 +2448,7 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
           payment_status = @paymentStatus,
           cancel_reason = @cancelReason,
           cancelled_at = GETDATE(),
+          hold_expires_at = NULL,
           refund_amount = ISNULL(refund_amount, 0) + @refundAmount,
           updated_at = GETDATE()
       WHERE booking_id = @id
@@ -2185,12 +2456,14 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
 
   const updatedBooking = await getBookingById(cleanId);
 
-  // Thông báo cho người chơi & chủ sân (kèm lý do hủy / từ chối rõ ràng - S3-14)
+  // Thông báo cho người chơi & chủ sân / nhân viên (kèm lý do hủy / từ chối rõ ràng - S3-14)
   if (currentBooking.user_id) {
     const isRejectedByOwner = cancelReason.startsWith('[Từ chối đơn]');
     const cleanReasonText = cancelReason.replace(/^\[Từ chối đơn\]\s*/i, '');
     await createNotificationSafe(pool, {
       userId: currentBooking.user_id,
+      type: 'BOOKING',
+      link: `/bookings?bookingId=${cleanId}`,
       title: isRejectedByOwner
         ? `❌ Đơn đặt sân #SPL-${cleanId} đã bị từ chối`
         : `Đã hủy đơn đặt sân #SPL-${cleanId}`,
@@ -2198,6 +2471,20 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
         refundAmount > 0
           ? `${isRejectedByOwner ? `Đơn đặt sân "${currentBooking.court_name}" đã bị từ chối. Lý do: ${cleanReasonText}.` : `Đơn đặt sân "${currentBooking.court_name}" đã được hủy (Lý do: ${cleanReasonText}).`} Hệ thống đã hoàn trả ${refundAmount.toLocaleString('vi-VN')}đ (${Math.round(refundRate * 100)}%) về phương thức ${refundMethod}.`
           : `${isRejectedByOwner ? `Đơn đặt sân "${currentBooking.court_name}" (${currentBooking.booking_date} ${currentBooking.start_time}-${currentBooking.end_time}) đã bị từ chối. Lý do: ${cleanReasonText}.` : `Đơn đặt sân "${currentBooking.court_name}" (${currentBooking.booking_date} ${currentBooking.start_time}-${currentBooking.end_time}) đã được hủy. Lý do: ${cleanReasonText}.`}`,
+    });
+  }
+
+  const cancelMgmtIds = await getCourtManagementRecipientIds(pool, currentBooking.court_id, actorUser?.id);
+  if (currentBooking.owner_id && currentBooking.owner_id !== actorUser?.id && !cancelMgmtIds.includes(currentBooking.owner_id)) {
+    cancelMgmtIds.push(currentBooking.owner_id);
+  }
+  const filteredCancelMgmt = cancelMgmtIds.filter((uid) => uid !== currentBooking.user_id);
+  if (filteredCancelMgmt.length > 0) {
+    await createNotificationsForUsers(pool, filteredCancelMgmt, {
+      type: 'BOOKING',
+      link: `/owner/bookings?bookingId=${cleanId}&date=${currentBooking.booking_date}`,
+      title: `Đơn đặt sân #SPL-${cleanId} đã bị hủy`,
+      content: `Khung giờ ${currentBooking.start_time} - ${currentBooking.end_time} ngày ${currentBooking.booking_date} tại sân "${currentBooking.court_name}" đã được hủy. Lý do: ${cancelReason}.`,
     });
   }
 
@@ -2246,12 +2533,14 @@ export async function rejectOnlineBooking(bookingId, data = {}, actorUser = null
 export async function updateBooking(bookingId, data, actorUser = null) {
   const cleanStatus = (data.status || '').toUpperCase();
   const validStatuses = [
+    'HOLD',
     'PENDING',
     'CONFIRMED',
     'CHECKED-IN',
     'COMPLETED',
     'CANCELLED',
     'NO-SHOW',
+    'EXPIRED',
   ];
   if (!validStatuses.includes(cleanStatus)) {
     throw new AppError('Trạng thái đơn đặt sân không hợp lệ.', 400);
@@ -2264,6 +2553,10 @@ export async function updateBooking(bookingId, data, actorUser = null) {
   }
 
   const pool = await getPool();
+
+  // Đơn giữ chỗ đã quá hạn thì tự chuyển EXPIRED trước khi đổi trạng thái
+  await expireStaleHolds(pool, { bookingId: Number(bookingId) });
+
   const currentRes = await pool
     .request()
     .input('id', bookingId)
@@ -2287,6 +2580,8 @@ export async function updateBooking(bookingId, data, actorUser = null) {
 
   // Kiểm tra luồng chuyển trạng thái hợp lệ (State Machine)
   const allowedTransitions = {
+    HOLD: ['CONFIRMED', 'CHECKED-IN', 'CANCELLED', 'EXPIRED'],
+    EXPIRED: ['EXPIRED', 'CONFIRMED', 'CANCELLED'],
     PENDING: ['CONFIRMED', 'CHECKED-IN', 'COMPLETED', 'CANCELLED', 'NO-SHOW'],
     CONFIRMED: ['CHECKED-IN', 'COMPLETED', 'CANCELLED', 'NO-SHOW'],
     'CHECKED-IN': ['COMPLETED', 'CANCELLED'],
@@ -2312,6 +2607,7 @@ export async function updateBooking(bookingId, data, actorUser = null) {
     .query(`
       UPDATE bookings
       SET status = @status,
+          hold_expires_at = CASE WHEN @status <> 'HOLD' THEN NULL ELSE hold_expires_at END,
           updated_at = GETDATE()
       OUTPUT INSERTED.*
       WHERE booking_id = @id
@@ -2423,29 +2719,32 @@ export async function updateBooking(bookingId, data, actorUser = null) {
     const dateLabel = formatDateStr(updated.booking_date);
     const timeLabel = `${formatTimeStr(updated.start_time)} - ${formatTimeStr(updated.end_time)}`;
 
-    if (cleanStatus === 'CONFIRMED') {
-      await createNotificationSafe(pool, {
-        userId: updated.user_id,
+    const statusMessages = {
+      CONFIRMED: {
         title: `✅ Đơn đặt sân #SPL-${bookingId} đã được xác nhận`,
-        content: `Chủ sân đã xác nhận lịch đặt sân "${courtLabel}" ngày ${dateLabel} (${timeLabel}). Chúc bạn có trận đấu vui vẻ!`,
-      });
-    } else if (cleanStatus === 'CHECKED-IN') {
-      await createNotificationSafe(pool, {
-        userId: updated.user_id,
-        title: `🏃 Đã check-in nhận sân đơn #SPL-${bookingId}`,
-        content: `Bạn đã check-in nhận sân "${courtLabel}" (${dateLabel} ${timeLabel}).`,
-      });
-    } else if (cleanStatus === 'COMPLETED') {
-      await createNotificationSafe(pool, {
-        userId: updated.user_id,
-        title: `🏆 Hoàn thành trận đấu #SPL-${bookingId}`,
+        content: `Chủ sân đã xác nhận lịch đặt sân "${courtLabel}" ngày ${dateLabel} (${timeLabel}). Hãy đến đúng giờ để check-in nhé!`,
+      },
+      'CHECKED-IN': {
+        title: `🏃 Check-in thành công đơn #SPL-${bookingId}`,
+        content: `Bạn đã check-in nhận sân "${courtLabel}" (${dateLabel} ${timeLabel}). Chúc bạn có trận đấu tuyệt vời!`,
+      },
+      COMPLETED: {
+        title: `🏆 Hoàn tất đơn đặt sân #SPL-${bookingId}`,
         content: `Đơn đặt sân "${courtLabel}" ngày ${dateLabel} đã hoàn tất và tất toán đầy đủ. Cảm ơn bạn đã sử dụng SportLink!`,
-      });
-    } else if (cleanStatus === 'NO-SHOW') {
+      },
+      'NO-SHOW': {
+        title: `⚠️ Ghi nhận vắng mặt (No-show) đơn #SPL-${bookingId}`,
+        content: `Đơn đặt sân "${courtLabel}" ngày ${dateLabel} (${timeLabel}) được ghi nhận không đến nhận sân (No-show). Điểm uy tín bị trừ 0.5★.`,
+      },
+    };
+    const msg = statusMessages[cleanStatus];
+    if (msg) {
       await createNotificationSafe(pool, {
         userId: updated.user_id,
-        title: `⚠️ Ghi nhận vắng mặt (No-show) đơn #SPL-${bookingId}`,
-        content: `Đơn đặt sân "${courtLabel}" ngày ${dateLabel} (${timeLabel}) được ghi nhận không đến nhận sân (trừ 0.5★ điểm uy tín).`,
+        type: 'BOOKING',
+        link: `/bookings?bookingId=${bookingId}`,
+        title: msg.title,
+        content: msg.content,
       });
     }
   }
@@ -2484,6 +2783,9 @@ export async function createMaintenance(user, data) {
     throw new AppError('Bạn không có quyền đặt lịch bảo trì cho sân của chủ sân khác.', 403);
   }
 
+  // Giải phóng giữ chỗ quá hạn rồi mới kiểm tra xung đột bảo trì
+  await expireStaleHolds(pool, { courtId, bookingDate: date });
+
   // Kiểm tra xem khung giờ này có đơn đặt sân đang hiệu lực không
   const activeBookingConflict = await pool
     .request()
@@ -2496,7 +2798,7 @@ export async function createMaintenance(user, data) {
       FROM bookings
       WHERE court_id = @courtId
         AND booking_date = @bookingDate
-        AND status IN ('PENDING', 'CONFIRMED', 'CHECKED-IN')
+        AND ${BLOCKING_BOOKING_CONDITION}
         AND start_time < CAST(@endTime AS TIME)
         AND end_time > CAST(@startTime AS TIME)
     `);

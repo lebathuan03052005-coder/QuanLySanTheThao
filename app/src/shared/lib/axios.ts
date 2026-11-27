@@ -27,7 +27,19 @@ api.interceptors.request.use(
 
 // Response Interceptor — Xử lý lỗi 401 tập trung & tự động thử lại 1 lần nếu kết nối mạng thoáng chốc gián đoạn
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = (response.config?.method || '').toLowerCase();
+    const url = response.config?.url || '';
+    if (
+      ['post', 'put', 'patch', 'delete'].includes(method) &&
+      !url.includes('/notifications') &&
+      !url.includes('/auth') &&
+      useAuthStore.getState().token
+    ) {
+      window.dispatchEvent(new CustomEvent('sportlink:refresh-notifications'));
+    }
+    return response;
+  },
   async (error) => {
     const config = error.config;
     if (config && !error.response && !config._retried) {

@@ -47,7 +47,16 @@ export interface ScheduleBooking {
   endTime: string; // HH:mm
   totalPrice: number;
   depositAmount: number;
-  status: 'PENDING' | 'CONFIRMED' | 'CHECKED-IN' | 'COMPLETED' | 'CANCELLED' | 'NO-SHOW';
+  status:
+    | 'HOLD'
+    | 'PENDING'
+    | 'CONFIRMED'
+    | 'CHECKED-IN'
+    | 'COMPLETED'
+    | 'CANCELLED'
+    | 'NO-SHOW'
+    | 'EXPIRED';
+  holdSecondsRemaining?: number | null;
   createdAt: string;
 }
 
@@ -213,6 +222,7 @@ export interface PaymentSessionResponse {
   paymentType: 'FULL_PAYMENT' | 'DEPOSIT';
   paymentMethod: 'VNPAY' | 'MOMO' | 'VIETQR' | 'BANK_TRANSFER' | 'CASH';
   status: string;
+  holdSecondsRemaining: number | null;
   sandboxGateway: {
     provider: string;
     terminalCode: string;
@@ -252,7 +262,17 @@ export interface PlayerBookingItem {
   paid_amount: number;
   refunded_amount: number;
   remaining_amount: number;
-  status: 'PENDING' | 'CONFIRMED' | 'CHECKED-IN' | 'COMPLETED' | 'CANCELLED' | 'NO-SHOW';
+  status:
+    | 'HOLD'
+    | 'PENDING'
+    | 'CONFIRMED'
+    | 'CHECKED-IN'
+    | 'COMPLETED'
+    | 'CANCELLED'
+    | 'NO-SHOW'
+    | 'EXPIRED';
+  hold_seconds_remaining?: number | null;
+  hold_expires_at?: string | null;
   payment_status: 'UNPAID' | 'DEPOSIT_PAID' | 'PAID' | 'REFUNDED' | 'PARTIAL_REFUND' | string;
   payment_method?: string | null;
   cancel_reason?: string | null;

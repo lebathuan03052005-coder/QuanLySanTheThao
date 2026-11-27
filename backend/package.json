@@ -15,7 +15,8 @@
     "test:s207": "node --env-file=.env src/scripts/test_s2_07_pricing.js",
     "test:tc04": "node --env-file=.env src/scripts/test_tc04_rbac.js",
     "test:auth": "node --env-file=.env src/scripts/test_auth_security.js",
-    "test:s3huu": "node --env-file=.env src/scripts/test_sprint3_huu.js"
+    "test:s3huu": "node --env-file=.env src/scripts/test_sprint3_huu.js",
+    "test:notifications": "node --env-file=.env src/scripts/test_notifications.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

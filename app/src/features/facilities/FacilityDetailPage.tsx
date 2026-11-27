@@ -806,7 +806,7 @@ export default function FacilityDetailPage() {
         });
       } else {
         setBookingSuccessMsg(
-          `Đặt giữ chỗ sân "${bookingCourt.court_name}" (#SPL-${createdId || ""}) thành công! Bạn có thể thanh toán tại mục "Lịch đặt của tôi".`
+          `Đã giữ chỗ sân "${bookingCourt.court_name}" (#SPL-${createdId || ""}) trong 10 phút! Trả cọc 30% hoặc 100% tại "Lịch đặt của tôi" để khoá lịch ngay (không cần chủ sân xác nhận); quá hạn khung giờ sẽ tự mở lại.`
         );
         setTimeout(() => {
           setBookingCourt(null);
@@ -1702,6 +1702,16 @@ export default function FacilityDetailPage() {
                 )}
               </div>
 
+              {/* Thông báo: trả 30% hoặc 100% để khoá lịch, không cần chủ sân duyệt */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-1">
+                <p className="font-bold">🔒 Thanh toán để khoá lịch ngay — không cần chủ sân xác nhận</p>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  Trả trước <strong>30% (cọc giữ sân)</strong> hoặc <strong>100%</strong> là khung giờ
+                  được chốt ngay, phần còn lại (nếu cọc 30%) trả tại sân. Nếu chọn trả sau, hệ thống
+                  chỉ giữ chỗ <strong>10 phút</strong> rồi tự mở lại cho người khác.
+                </p>
+              </div>
+
               {/* Chọn phương thức thanh toán sau khi giữ sân */}
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
@@ -1750,7 +1760,7 @@ export default function FacilityDetailPage() {
                         : "border-gray-200 text-gray-600 hover:bg-gray-50"
                     }`}
                   >
-                    ⏳ Đặt giữ chỗ, trả sau
+                    ⏳ Giữ chỗ 10 phút, trả sau
                   </button>
                 </div>
               </div>

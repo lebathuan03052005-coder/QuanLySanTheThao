@@ -19,6 +19,7 @@
  */
 
 import { getPool } from '../core/config/db.js';
+import { runSprint2Migration } from './migrate_sprint2.js';
 import * as authService from '../modules/auth/auth.service.js';
 import * as bookingService from '../modules/bookings/booking.service.js';
 import * as facilityService from '../modules/facilities/facility.service.js';
@@ -51,6 +52,7 @@ async function runTests() {
   console.log('🚀 BẮT ĐẦU KIỂM THỬ SPRINT 3 (S3-01, S3-02, S3-06, S3-14, S3-15)');
   console.log('======================================================================\n');
 
+  await runSprint2Migration({ closePool: false });
   const pool = await getPool();
   const ts = Date.now();
   const testEmail = `player.s3huu.${ts}@sportlink.vn`;
