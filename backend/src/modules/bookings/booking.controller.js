@@ -19,9 +19,31 @@ export async function getBookingQuote(req, res, next) {
   }
 }
 
+export async function getBookingCartQuote(req, res, next) {
+  try {
+    const data = await bookingService.calculateCartQuote(req.body);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function checkoutBookingCart(req, res, next) {
+  try {
+    const data = await bookingService.checkoutBookingCart(req.body, req.user);
+    res.status(201).json({
+      success: true,
+      message: `Đã đặt thành công ${data.totalBookings} khung giờ trong giỏ đặt sân!`,
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getBookings(req, res, next) {
   try {
-    const bookings = await bookingService.getBookingsByUser(req.user);
+    const bookings = await bookingService.getBookingsByUser(req.user, req.query);
     res.json({ success: true, data: bookings });
   } catch (err) {
     next(err);
@@ -145,6 +167,28 @@ export async function cancelBooking(req, res, next) {
         refundAmt > 0
           ? `Đã hủy đặt sân và hoàn trả ${refundAmt.toLocaleString('vi-VN')}đ thành công.`
           : 'Đã hủy đặt sân thành công.',
+      data: result.booking,
+      refund: result.refund,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function rejectBooking(req, res, next) {
+  try {
+    const result = await bookingService.rejectOnlineBooking(
+      req.params.id,
+      req.body || {},
+      req.user
+    );
+    const refundAmt = result.refund?.refundAmount || 0;
+    res.json({
+      success: true,
+      message:
+        refundAmt > 0
+          ? `Đã từ chối đơn đặt sân, gửi thông báo kèm lý do cho Người chơi và hoàn trả ${refundAmt.toLocaleString('vi-VN')}đ.`
+          : 'Đã từ chối đơn đặt sân và gửi thông báo kèm lý do cho Người chơi.',
       data: result.booking,
       refund: result.refund,
     });

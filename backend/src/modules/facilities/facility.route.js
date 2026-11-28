@@ -29,6 +29,7 @@ router.delete('/:id/images', facilityController.deleteFacilityImage);
 // Quản lý danh sách sân con trực thuộc cơ sở (SUB-COURTS)
 router.get('/:facilityId/courts', facilityController.getCourtsByFacility);
 router.post('/:facilityId/courts', facilityController.createCourtInFacility);
+router.get('/courts/:courtId/affected-bookings', facilityController.getAffectedBookingsForCourt);
 router.put('/courts/:courtId', facilityController.updateCourtInFacility);
 router.patch('/courts/:courtId/status', facilityController.updateCourtStatus);
 

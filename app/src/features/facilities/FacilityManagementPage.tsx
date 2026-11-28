@@ -8,8 +8,10 @@ import {
   createCourtInFacilityApi,
   updateCourtInFacilityApi,
   updateCourtStatusApi,
+  getAffectedBookingsForCourtApi,
   type FacilityItem,
   type CourtItem,
+  type AffectedBookingItem,
 } from './facility.api';
 import { getOwnerSportsApi, type SportItem } from '../sports/sport.api';
 import CourtPricingModal from './CourtPricingModal';
@@ -157,13 +159,18 @@ export default function FacilityManagementPage() {
   const [pricingCourt, setPricingCourt] = useState<CourtItem | null>(null);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
 
-  // Modal Xác nhận đổi trạng thái (Cơ sở hoặc Sân con)
+  // Modal Xác nhận đổi trạng thái (Cơ sở hoặc Sân con - S3-15)
   const [statusConfirmModal, setStatusConfirmModal] = useState<{
     type: 'FACILITY' | 'COURT';
     id: number;
     name: string;
-    targetStatus: 'ACTIVE' | 'INACTIVE';
+    targetStatus: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE';
   } | null>(null);
+  const [affectedBookings, setAffectedBookings] = useState<AffectedBookingItem[]>([]);
+  const [loadingAffected, setLoadingAffected] = useState(false);
+  const [maintenanceReason, setMaintenanceReason] = useState('Bảo trì định kỳ mặt sân & hệ thống chiếu sáng');
+  const [cancelAffectedBookings, setCancelAffectedBookings] = useState(false);
+  const [statusSubmitting, setStatusSubmitting] = useState(false);
 
   useEffect(() => {
     loadInitialData();
@@ -441,14 +448,46 @@ export default function FacilityManagementPage() {
     }
   }
 
-  // ==================== XỬ LÝ ĐỔI TRẠNG THÁI ====================
+  // ==================== XỬ LÝ ĐỔI TRẠNG THÁI (S3-15) ====================
+  async function handleOpenCourtStatusModal(
+    court: CourtItem,
+    targetStatus: 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE'
+  ) {
+    setStatusConfirmModal({
+      type: 'COURT',
+      id: court.court_id,
+      name: court.court_name,
+      targetStatus,
+    });
+    setMaintenanceReason(
+      targetStatus === 'MAINTENANCE'
+        ? 'Bảo trì mặt sân & hệ thống chiếu sáng'
+        : 'Tạm ngừng hoạt động sân'
+    );
+    setCancelAffectedBookings(false);
+    setAffectedBookings([]);
+
+    if (targetStatus === 'MAINTENANCE' || targetStatus === 'INACTIVE') {
+      setLoadingAffected(true);
+      try {
+        const res = await getAffectedBookingsForCourtApi(court.court_id);
+        setAffectedBookings(res.affectedBookings || []);
+      } catch {
+        setAffectedBookings([]);
+      } finally {
+        setLoadingAffected(false);
+      }
+    }
+  }
+
   async function handleConfirmStatusChange() {
     if (!statusConfirmModal) return;
     const { type, id, targetStatus } = statusConfirmModal;
 
+    setStatusSubmitting(true);
     try {
       if (type === 'FACILITY') {
-        await updateFacilityStatusApi(id, targetStatus);
+        await updateFacilityStatusApi(id, targetStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE');
         await loadInitialData(selectedFacility?.facility_id);
         showToast(
           targetStatus === 'ACTIVE'
@@ -456,18 +495,29 @@ export default function FacilityManagementPage() {
             : 'Đã chuyển cơ sở sang trạng thái ngừng hoạt động.'
         );
       } else {
-        await updateCourtStatusApi(id, targetStatus);
+        const res = await updateCourtStatusApi(id, targetStatus, {
+          reason: maintenanceReason,
+          notifyPlayers: true,
+          cancelAffected: cancelAffectedBookings,
+        });
         await loadInitialData(selectedFacility?.facility_id);
-        showToast(
-          targetStatus === 'ACTIVE'
-            ? 'Đã kích hoạt lại sân con.'
-            : 'Đã chuyển sân con sang trạng thái ngừng nhận đặt.'
-        );
+        if (res.warningMessage) {
+          showToast(res.warningMessage);
+        } else {
+          showToast(
+            targetStatus === 'ACTIVE'
+              ? 'Đã kích hoạt sân con trở lại trạng thái Hoạt động.'
+              : targetStatus === 'MAINTENANCE'
+                ? 'Đã chuyển sân con sang trạng thái Bảo trì & chặn đặt sân.'
+                : 'Đã chuyển sân con sang trạng thái Tạm đóng.'
+          );
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể cập nhật trạng thái.';
       alert(msg);
     } finally {
+      setStatusSubmitting(false);
       setStatusConfirmModal(null);
     }
   }
@@ -966,6 +1016,7 @@ export default function FacilityManagementPage() {
                     >
                       <option value="ALL">Mọi trạng thái</option>
                       <option value="ACTIVE">Đang hoạt động</option>
+                      <option value="MAINTENANCE">Đang bảo trì</option>
                       <option value="INACTIVE">Đang tạm đóng</option>
                     </select>
 
@@ -1063,16 +1114,26 @@ export default function FacilityManagementPage() {
                                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
                                     isCourtActive
                                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-slate-100 text-slate-600 border-slate-300'
+                                      : court.status === 'MAINTENANCE'
+                                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                        : 'bg-slate-100 text-slate-600 border-slate-300'
                                   }`}
                                 >
                                   <span
                                     className={`w-1.5 h-1.5 rounded-full ${
-                                      isCourtActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                                      isCourtActive
+                                        ? 'bg-emerald-500 animate-pulse'
+                                        : court.status === 'MAINTENANCE'
+                                          ? 'bg-amber-500'
+                                          : 'bg-slate-400'
                                     }`}
                                   />
                                   <span>
-                                    {isCourtActive ? 'Đang mở đặt lịch' : 'Ngừng hoạt động'}
+                                    {isCourtActive
+                                      ? 'Đang mở đặt lịch'
+                                      : court.status === 'MAINTENANCE'
+                                        ? '🔧 Đang bảo trì'
+                                        : 'Ngừng hoạt động'}
                                   </span>
                                 </span>
                               </div>
@@ -1139,23 +1200,38 @@ export default function FacilityManagementPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleOpenEditCourt(court)}
-                                  className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                                  className="px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                                 >
-                                  Chỉnh sửa
+                                  Sửa
                                 </button>
+                                {court.status !== 'MAINTENANCE' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenCourtStatusModal(court, 'MAINTENANCE')}
+                                    className="px-2.5 py-1.5 text-xs font-bold rounded-xl transition-colors cursor-pointer text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+                                  >
+                                    🔧 Bảo trì
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenCourtStatusModal(court, 'ACTIVE')}
+                                    className="px-2.5 py-1.5 text-xs font-bold rounded-xl transition-colors cursor-pointer text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
+                                  >
+                                    ✓ Mở hoạt động
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    setStatusConfirmModal({
-                                      type: 'COURT',
-                                      id: court.court_id,
-                                      name: court.court_name,
-                                      targetStatus: isCourtActive ? 'INACTIVE' : 'ACTIVE',
-                                    })
+                                    handleOpenCourtStatusModal(
+                                      court,
+                                      isCourtActive ? 'INACTIVE' : 'ACTIVE'
+                                    )
                                   }
-                                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
+                                  className={`px-2.5 py-1.5 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                                     isCourtActive
-                                      ? 'text-amber-700 bg-amber-50 hover:bg-amber-100'
+                                      ? 'text-rose-700 bg-rose-50 hover:bg-rose-100'
                                       : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                                   }`}
                                 >
@@ -1495,10 +1571,10 @@ export default function FacilityManagementPage() {
         </div>
       )}
 
-      {/* ==================== MODAL XÁC NHẬN ĐỔI TRẠNG THÁI ==================== */}
+      {/* ==================== MODAL XÁC NHẬN ĐỔI TRẠNG THÁI & CẢNH BÁO ĐƠN BỊ ẢNH HƯỞNG (S3-15) ==================== */}
       {statusConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 p-6 md:p-7 animate-scale-up">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-100 p-6 md:p-7 animate-scale-up">
             <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -1507,20 +1583,92 @@ export default function FacilityManagementPage() {
 
             <h3 className="text-lg font-bold text-slate-900">
               {statusConfirmModal.targetStatus === 'ACTIVE'
-                ? 'Xác nhận kích hoạt lại'
-                : 'Xác nhận ngừng hoạt động'}
+                ? 'Xác nhận mở hoạt động trở lại'
+                : statusConfirmModal.targetStatus === 'MAINTENANCE'
+                  ? '🔧 Chuyển sân sang trạng thái Bảo trì'
+                  : 'Xác nhận tạm ngừng hoạt động'}
             </h3>
-            <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-              Bạn có chắc chắn muốn{' '}
+            <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+              Bạn đang thao tác{' '}
               <strong className="text-slate-800">
                 {statusConfirmModal.targetStatus === 'ACTIVE'
-                  ? 'mở hoạt động lại'
-                  : 'tạm ngừng hoạt động'}
+                  ? 'kích hoạt Hoạt động (ACTIVE)'
+                  : statusConfirmModal.targetStatus === 'MAINTENANCE'
+                    ? 'chuyển sang Bảo trì (MAINTENANCE) & chặn đặt sân mới'
+                    : 'tạm ngừng hoạt động (INACTIVE)'}
               </strong>{' '}
               đối với{' '}
               {statusConfirmModal.type === 'FACILITY' ? 'cơ sở' : 'sân con'}{' '}
-              <strong className="text-emerald-700">"{statusConfirmModal.name}"</strong>?
+              <strong className="text-emerald-700">"{statusConfirmModal.name}"</strong>.
             </p>
+
+            {statusConfirmModal.type === 'COURT' &&
+              statusConfirmModal.targetStatus !== 'ACTIVE' && (
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Lý do bảo trì / tạm đóng (gửi thông báo cho người chơi):
+                    </label>
+                    <input
+                      type="text"
+                      value={maintenanceReason}
+                      onChange={(e) => setMaintenanceReason(e.target.value)}
+                      placeholder="Nhập lý do bảo trì sân..."
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  {loadingAffected ? (
+                    <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-500">
+                      Đang kiểm tra các đơn đặt sân sắp tới bị ảnh hưởng...
+                    </div>
+                  ) : affectedBookings.length > 0 ? (
+                    <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-rose-800">
+                          ⚠️ Cảnh báo: Có {affectedBookings.length} đơn đặt sân sắp tới bị ảnh hưởng!
+                        </span>
+                      </div>
+                      <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                        {affectedBookings.map((ab) => (
+                          <div
+                            key={ab.bookingId}
+                            className="p-2 rounded-xl bg-white border border-rose-100 flex items-center justify-between gap-2"
+                          >
+                            <div>
+                              <span className="font-bold text-slate-800">
+                                #{ab.bookingId} • {ab.playerName}
+                              </span>
+                              <span className="block text-[11px] text-slate-500">
+                                {ab.bookingDate} ({ab.startTime} - {ab.endTime}) • {ab.status}
+                              </span>
+                            </div>
+                            <span className="font-bold text-rose-700 shrink-0">
+                              {Math.round(ab.totalPrice || 0).toLocaleString('vi-VN')}đ
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <label className="flex items-start gap-2 pt-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={cancelAffectedBookings}
+                          onChange={(e) => setCancelAffectedBookings(e.target.checked)}
+                          className="mt-0.5 rounded border-rose-300 text-rose-600 focus:ring-rose-500"
+                        />
+                        <span className="text-[11px] font-semibold text-rose-900 leading-snug">
+                          Tự động hủy toàn bộ {affectedBookings.length} đơn bị ảnh hưởng, hoàn tiền 100% và gửi thông báo cho Người chơi (Nếu không chọn, hệ thống sẽ giữ đơn và gửi cảnh báo bảo trì cho Người chơi).
+                        </span>
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold">
+                      ✓ Không có đơn đặt sân nào sắp tới bị ảnh hưởng bởi đợt bảo trì này.
+                    </div>
+                  )}
+                </div>
+              )}
 
             <div className="mt-6 flex items-center justify-end gap-3">
               <button
@@ -1532,10 +1680,15 @@ export default function FacilityManagementPage() {
               </button>
               <button
                 type="button"
+                disabled={statusSubmitting}
                 onClick={handleConfirmStatusChange}
-                className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 text-white text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer"
+                className={`px-5 py-2 text-white text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-50 ${
+                  statusConfirmModal.targetStatus === 'MAINTENANCE'
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600'
+                }`}
               >
-                Xác nhận
+                {statusSubmitting ? 'Đang xử lý...' : 'Xác nhận cập nhật'}
               </button>
             </div>
           </div>

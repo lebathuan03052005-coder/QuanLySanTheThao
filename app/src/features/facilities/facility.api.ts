@@ -8,7 +8,7 @@ import api from '../../shared/lib/axios';
  */
 
 export type FacilityStatus = 'ACTIVE' | 'INACTIVE';
-export type CourtStatus = 'ACTIVE' | 'INACTIVE';
+export type CourtStatus = 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE';
 
 export interface FacilityCourtPreview {
   court_id: number;
@@ -281,15 +281,66 @@ export interface CourtPriceRule {
   price: number;
 }
 
+export interface AffectedBookingItem {
+  bookingId: number;
+  courtId: number;
+  userId: number | null;
+  customerId: number | null;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: number;
+  depositAmount: number;
+  status: string;
+  paymentStatus: string;
+  playerName: string;
+  playerPhone: string;
+  playerEmail: string;
+}
+
+export interface AffectedBookingsResponse {
+  courtId: number;
+  courtName: string;
+  facilityName: string;
+  currentStatus: CourtStatus;
+  affectedCount: number;
+  affectedBookings: AffectedBookingItem[];
+}
+
+export async function getAffectedBookingsForCourtApi(
+  courtId: number,
+  params?: { date?: string; startTime?: string; endTime?: string }
+): Promise<AffectedBookingsResponse> {
+  const res = await api.get<ApiResponse<AffectedBookingsResponse>>(
+    `/facilities/courts/${courtId}/affected-bookings`,
+    { params }
+  );
+  return res.data.data;
+}
+
 /**
- * Bật / tắt trạng thái hoạt động của sân con.
+ * [WBS 3.1.4 - S3-15] Cập nhật trạng thái sân con: Hoạt động (ACTIVE) / Bảo trì (MAINTENANCE) / Tạm đóng (INACTIVE).
  */
 export async function updateCourtStatusApi(
   courtId: number,
-  status: CourtStatus
-): Promise<CourtItem> {
-  const res = await api.patch<ApiResponse<CourtItem>>(`/facilities/courts/${courtId}/status`, {
+  status: CourtStatus,
+  options?: {
+    reason?: string;
+    notifyPlayers?: boolean;
+    cancelAffected?: boolean;
+  }
+): Promise<
+  CourtItem & {
+    affectedCount?: number;
+    affectedBookings?: AffectedBookingItem[];
+    notifiedCount?: number;
+    cancelledCount?: number;
+    warningMessage?: string;
+  }
+> {
+  const res = await api.patch(`/facilities/courts/${courtId}/status`, {
     status,
+    ...options,
   });
   return res.data.data;
 }

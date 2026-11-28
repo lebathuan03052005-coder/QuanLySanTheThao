@@ -7,8 +7,10 @@ export interface User {
   id: number;
   fullName: string;
   email: string;
+  phone?: string;
   role: UserRole;
   avatarUrl?: string | null;
+  reputationScore?: number;
 }
 
 interface AuthState {
@@ -17,6 +19,7 @@ interface AuthState {
   isAuthenticated: boolean;
   setAuth: (user: User, token: string) => void;
   updateUserAvatar: (avatarUrl: string) => void;
+  updateUserInfo: (partial: Partial<User>) => void;
   logout: () => void;
 }
 
@@ -37,6 +40,11 @@ export const useAuthStore = create<AuthState>()(
       updateUserAvatar: (avatarUrl: string) =>
         set((state) => ({
           user: state.user ? { ...state.user, avatarUrl } : null,
+        })),
+
+      updateUserInfo: (partial: Partial<User>) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, ...partial } : null,
         })),
 
       logout: () =>

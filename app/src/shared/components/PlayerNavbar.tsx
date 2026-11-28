@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/authStore';
+import { useBookingCartStore } from '../stores/bookingCartStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import NotificationPanel from './NotificationPanel';
 
 export default function PlayerNavbar() {
   const { user, logout } = useAuthStore();
+  const { items: cartItems, setOpen: setCartOpen } = useBookingCartStore();
   const { unreadCount, loadNotifications } = useNotificationStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -44,12 +46,15 @@ export default function PlayerNavbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Đóng mobile menu khi chuyển trang
+  // Đóng mobile menu khi chuyển trang & tải thông báo thực tế từ Backend
   useEffect(() => {
     setMobileMenuOpen(false);
     setShowUserMenu(false);
     setShowNotificationMenu(false);
-  }, [location.pathname]);
+    if (user) {
+      loadNotifications();
+    }
+  }, [location.pathname, user?.id, loadNotifications]);
 
   function handleLogout() {
     logout();
@@ -172,9 +177,23 @@ export default function PlayerNavbar() {
             </nav>
           </div>
 
-          {/* 3. Khu vực Thao tác bên phải (Thông báo, Tài khoản & Hamburger) */}
-          <div className="flex items-center gap-3">
-            {/* Nút Chuông thông báo */}
+          {/* 3. Khu vực Thao tác bên phải (Giỏ đặt sân, Thông báo, Tài khoản & Hamburger) */}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Nút Giỏ đặt sân đa khung giờ (S3-06) */}
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 text-xs font-bold transition cursor-pointer"
+              title="Giỏ đặt sân đa khung giờ (Tự động tính giá)"
+            >
+              <span>🛒</span>
+              <span className="hidden sm:inline">Giỏ đặt sân</span>
+              <span className="px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] font-black">
+                {cartItems.length}
+              </span>
+            </button>
+
+            {/* Nút Chuông thông báo có Badge số màu đỏ */}
             <div className="relative" ref={notifMenuRef}>
               <button
                 onClick={() => {
@@ -242,7 +261,7 @@ export default function PlayerNavbar() {
                   Đăng nhập
                 </Link>
                 <Link
-                  to="/login"
+                  to="/register"
                   className="px-3.5 py-1.5 text-xs font-bold bg-black text-white hover:bg-gray-800 rounded-xl transition shadow-xs"
                 >
                   Đăng ký
@@ -312,6 +331,16 @@ export default function PlayerNavbar() {
                     </div>
 
                   <div className="py-1">
+                    <Link
+                      to="/profile"
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors font-medium"
+                    >
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Hồ sơ cá nhân
+                    </Link>
+
                     <Link
                       to="/bookings"
                       className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"

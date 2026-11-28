@@ -69,6 +69,41 @@ export async function runSprint2Migration() {
       ALTER TABLE [dbo].[users] ADD [job_title] NVARCHAR(100) NULL;
     END
 
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'gender')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [gender] NVARCHAR(20) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'dob')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [dob] DATE NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'address')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [address] NVARCHAR(255) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'bio')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [bio] NVARCHAR(500) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'favorite_sports')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [favorite_sports] NVARCHAR(255) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'reset_otp')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [reset_otp] VARCHAR(10) NULL;
+    END
+
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[users]') AND name = 'reset_otp_expires')
+    BEGIN
+      ALTER TABLE [dbo].[users] ADD [reset_otp_expires] DATETIME NULL;
+    END
+
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE object_id = OBJECT_ID(N'[dbo].[court_staff]'))
     BEGIN
       CREATE TABLE [dbo].[court_staff] (

@@ -11,6 +11,7 @@ import {
 } from '../booking/booking.api';
 import PaymentSandboxModal from '../booking/PaymentSandboxModal';
 import { useAuthStore } from '../../shared/stores/authStore';
+import { useBookingCartStore } from '../../shared/stores/bookingCartStore';
 import {
   isPastBookingSlot,
   getLocalTodayIso,
@@ -54,6 +55,10 @@ export default function CourtListPage() {
 
   // Mở modal đặt sân và tự động chọn khung giờ tương lai gần nhất
   function handleOpenBooking(court: CourtItem) {
+    if ((court.status || 'ACTIVE').toUpperCase() === 'MAINTENANCE') {
+      alert(`Sân "${court.court_name}" hiện đang trong trạng thái Bảo trì và tạm ngừng nhận đặt lịch.`);
+      return;
+    }
     const initial = getInitialBookingTimes(getLocalTodayIso());
     setBookingCourt(court);
     setBookingDate(initial.bookingDate);
@@ -62,6 +67,67 @@ export default function CourtListPage() {
     setBookingPaymentChoice('VNPAY');
     setBookingErrorMsg(null);
     setBookingSuccessMsg(null);
+  }
+
+  function handleQuickDuration(hours: number) {
+    const startMin = timeToMinutes(bookingStartTime);
+    const newEndMin = Math.min(23 * 60, startMin + Math.round(hours * 60));
+    if (newEndMin <= startMin) return;
+    const endH = Math.floor(newEndMin / 60);
+    const endM = newEndMin % 60;
+    setBookingEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+    setBookingErrorMsg(null);
+  }
+
+  function handleAddToBookingCart() {
+    if (!bookingCourt) return;
+    if (isPastBookingSlot(bookingDate, bookingStartTime)) {
+      setBookingErrorMsg(
+        `Khung giờ ${bookingStartTime} ngày ${bookingDate} đã ở trong quá khứ. Vui lòng chọn khung giờ trong tương lai.`
+      );
+      return;
+    }
+    if (timeToMinutes(bookingEndTime) <= timeToMinutes(bookingStartTime)) {
+      setBookingErrorMsg('Giờ kết thúc phải lớn hơn giờ bắt đầu.');
+      return;
+    }
+    if (bookingQuote && !bookingQuote.isAvailable) {
+      setBookingErrorMsg(bookingQuote.conflictReason || 'Khung giờ này đã bận hoặc sân đang bảo trì.');
+      return;
+    }
+
+    const estimatedPrice =
+      bookingQuote?.totalPrice ||
+      Math.round(
+        ((timeToMinutes(bookingEndTime) - timeToMinutes(bookingStartTime)) / 60) *
+          (bookingCourt.price_per_hour || 200000)
+      );
+
+    const res = useBookingCartStore.getState().addItem({
+      courtId: bookingCourt.court_id,
+      courtName: bookingCourt.court_name,
+      facilityId: bookingCourt.facility_id,
+      facilityName: bookingCourt.facility_name || 'Cơ sở SportLink',
+      sportName: bookingCourt.sport_name || 'Bóng đá',
+      bookingDate,
+      startTime: bookingStartTime,
+      endTime: bookingEndTime,
+      basePricePerHour: bookingCourt.price_per_hour || 200000,
+      estimatedPrice,
+    });
+
+    if (!res.added) {
+      setBookingErrorMsg(res.message);
+      return;
+    }
+
+    setBookingErrorMsg(null);
+    setBookingSuccessMsg(res.message);
+    setTimeout(() => {
+      setBookingCourt(null);
+      setBookingSuccessMsg(null);
+      useBookingCartStore.getState().setOpen(true);
+    }, 650);
   }
 
   useEffect(() => {
@@ -349,9 +415,15 @@ export default function CourtListPage() {
                       <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold bg-white/90 backdrop-blur-xs text-blue-700 shadow-xs">
                         {court.sport_name || 'Bóng đá'}
                       </span>
-                      <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold bg-black text-white shadow-xs">
-                        {court.status || 'ACTIVE'}
-                      </span>
+                      {(court.status || 'ACTIVE').toUpperCase() === 'MAINTENANCE' ? (
+                        <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
+                          🔧 Đang bảo trì
+                        </span>
+                      ) : (
+                        <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold bg-black text-white shadow-xs">
+                          {court.status || 'ACTIVE'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Chi tiết sân */}
@@ -384,15 +456,26 @@ export default function CourtListPage() {
                       </span>
                     </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenBooking(court);
-                      }}
-                      className="bg-black hover:bg-gray-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs active:scale-95 cursor-pointer"
-                    >
-                      Đặt ngay
-                    </button>
+                    {(court.status || 'ACTIVE').toUpperCase() === 'MAINTENANCE' ? (
+                      <button
+                        type="button"
+                        disabled
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-amber-100 text-amber-800 border border-amber-300 font-bold text-xs px-4 py-2.5 rounded-xl cursor-not-allowed"
+                      >
+                        🔧 Đang bảo trì
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenBooking(court);
+                        }}
+                        className="bg-black hover:bg-gray-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs active:scale-95 cursor-pointer"
+                      >
+                        Đặt ngay
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -482,7 +565,61 @@ export default function CourtListPage() {
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200 text-xs space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                <span className="text-[11px] font-bold text-gray-600">Chọn nhanh thời lượng:</span>
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { label: '1 giờ', hours: 1 },
+                    { label: '1.5 giờ', hours: 1.5 },
+                    { label: '2 giờ', hours: 2 },
+                    { label: '3 giờ', hours: 3 },
+                  ].map((d) => {
+                    const curHours =
+                      (timeToMinutes(bookingEndTime) - timeToMinutes(bookingStartTime)) / 60;
+                    const active = Math.abs(curHours - d.hours) < 0.05;
+                    return (
+                      <button
+                        key={d.label}
+                        type="button"
+                        onClick={() => handleQuickDuration(d.hours)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                          active
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        {d.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200 text-xs space-y-1.5">
+                {bookingQuote?.slotBreakdown && bookingQuote.slotBreakdown.length > 0 && (
+                  <div className="pb-1.5 border-b border-blue-200/70 space-y-1 max-h-24 overflow-y-auto">
+                    <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block">
+                      Chi tiết giá tự động theo khung 30 phút:
+                    </span>
+                    <div className="grid grid-cols-2 gap-1">
+                      {bookingQuote.slotBreakdown.map((sb) => (
+                        <div
+                          key={sb.slot}
+                          className={`px-2 py-0.5 rounded border text-[10px] flex items-center justify-between ${
+                            sb.isPeak
+                              ? 'bg-amber-50 border-amber-200 text-amber-900'
+                              : 'bg-white border-blue-100 text-gray-700'
+                          }`}
+                        >
+                          <span className="font-semibold">
+                            {sb.slot} {sb.isPeak ? '🔥' : ''}
+                          </span>
+                          <span className="font-bold">{formatCurrency(sb.slotPrice)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Tổng tiền tự động:</span>
                   <strong className="text-sm font-black text-blue-700">
@@ -582,28 +719,47 @@ export default function CourtListPage() {
               )}
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-100">
               <button
                 type="button"
                 onClick={() => setBookingCourt(null)}
-                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                className="px-3.5 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
               >
                 Đóng
               </button>
-              <button
-                type="button"
-                disabled={bookingSubmitting || isPastBookingSlot(bookingDate, bookingStartTime)}
-                onClick={handleConfirmBooking}
-                className="px-5 py-2.5 rounded-lg text-xs font-bold bg-[#1d63ed] text-white hover:bg-blue-700 transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                {bookingSubmitting
-                  ? 'Đang khóa & tạo đơn...'
-                  : isPastBookingSlot(bookingDate, bookingStartTime)
-                  ? 'Khung giờ đã qua'
-                  : bookingPaymentChoice === 'LATER'
-                  ? 'Xác nhận đặt giữ chỗ'
-                  : `Đặt sân & Thanh toán (${bookingPaymentChoice})`}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={
+                    bookingSubmitting ||
+                    isPastBookingSlot(bookingDate, bookingStartTime) ||
+                    (bookingQuote ? !bookingQuote.isAvailable : false)
+                  }
+                  onClick={handleAddToBookingCart}
+                  className="px-3.5 py-2.5 rounded-lg text-xs font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1"
+                >
+                  <span>🛒</span>
+                  <span>Thêm vào giỏ</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    bookingSubmitting ||
+                    isPastBookingSlot(bookingDate, bookingStartTime) ||
+                    (bookingQuote ? !bookingQuote.isAvailable : false)
+                  }
+                  onClick={handleConfirmBooking}
+                  className="px-4 py-2.5 rounded-lg text-xs font-bold bg-[#1d63ed] text-white hover:bg-blue-700 transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {bookingSubmitting
+                    ? 'Đang khóa & tạo đơn...'
+                    : isPastBookingSlot(bookingDate, bookingStartTime)
+                      ? 'Khung giờ đã qua'
+                      : bookingPaymentChoice === 'LATER'
+                        ? 'Xác nhận đặt giữ chỗ'
+                        : `Đặt ngay (${bookingPaymentChoice})`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

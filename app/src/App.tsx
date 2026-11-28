@@ -1,5 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import LoginPage from "./features/auth/LoginPage";
+import RegisterPage from "./features/auth/RegisterPage";
+import ForgotPasswordPage from "./features/auth/ForgotPasswordPage";
+import PlayerProfilePage from "./features/auth/PlayerProfilePage";
 import PlayerLayout from "./shared/layouts/PlayerLayout";
 import OwnerLayout from "./shared/layouts/OwnerLayout";
 import PlayerHomePage from "./features/home/PlayerHomePage";
@@ -45,10 +48,13 @@ export default function App() {
       <NotificationToast />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
         {/* Route dành cho Player / Người dùng thông thường */}
         <Route path="/" element={<PlayerRouteGuard />}>
           <Route index element={<PlayerHomePage />} />
+          <Route path="profile" element={<PlayerProfilePage />} />
           <Route path="facilities/:id" element={<FacilityDetailPage />} />
           <Route path="courts" element={<CourtListPage />} />
           <Route path="bookings" element={<PlayerBookingsPage />} />

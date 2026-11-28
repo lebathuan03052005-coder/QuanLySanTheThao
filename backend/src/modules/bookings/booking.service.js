@@ -321,8 +321,9 @@ async function withCourtLock(courtId, fn) {
  * [4.3] Lấy thông tin tình trạng trống/đã đặt của 1 sân theo ngày và bảng giá động.
  */
 export async function getCourtAvailability(query = {}) {
-  const courtId = Number(query.courtId);
-  if (!courtId || isNaN(courtId)) {
+  const rawCourtId = query.courtId;
+  const courtId = Number(rawCourtId);
+  if (rawCourtId === undefined || rawCourtId === null || rawCourtId === '' || isNaN(courtId)) {
     throw new AppError('Vui lòng cung cấp courtId hợp lệ.', 400);
   }
   const date = query.date || query.bookingDate || getLocalDateStr();
@@ -427,13 +428,14 @@ export async function getCourtAvailability(query = {}) {
  * [4.3] Báo giá tự động theo khung giờ & kiểm tra nhanh xung đột trước khi đặt.
  */
 export async function calculateBookingQuote(data = {}) {
-  const courtId = Number(data.courtId);
+  const rawCourtId = data.courtId;
+  const courtId = Number(rawCourtId);
   const bookingDate = data.bookingDate || data.date || getLocalDateStr();
   const startTime = formatTimeStr(data.startTime || '17:00');
   const endTime = formatTimeStr(data.endTime || '18:30');
   const isHoliday = Boolean(data.isHoliday) || isVietnameseHoliday(bookingDate);
 
-  if (!courtId || isNaN(courtId)) {
+  if (rawCourtId === undefined || rawCourtId === null || rawCourtId === '' || isNaN(courtId)) {
     throw new AppError('Vui lòng chọn sân thể thao hợp lệ.', 400);
   }
 
@@ -487,9 +489,48 @@ export async function calculateBookingQuote(data = {}) {
       ? 'WEEKEND'
       : 'WEEKDAY';
 
+  // Bóc tách chi tiết từng bước 30 phút (S3-06: Price Breakdown)
+  const slotBreakdown = [];
+  const applicableRules = rules.filter((r) => {
+    const dt = (r.day_type || '').toUpperCase();
+    if (dayType === 'WEEKDAY') return dt === 'NORMAL' || dt === 'WEEKDAY';
+    return dt === dayType;
+  });
+  const finalRules =
+    applicableRules.length > 0
+      ? applicableRules
+      : rules.filter((r) => ['NORMAL', 'WEEKDAY'].includes((r.day_type || '').toUpperCase()));
+
+  for (let cur = startMin; cur < endMin; cur += 30) {
+    const mid = cur + 15;
+    const matched = finalRules.find((r) => {
+      const rStart = timeToMinutes(r.start_time);
+      const rEnd = timeToMinutes(r.end_time);
+      return mid >= rStart && mid <= rEnd;
+    });
+    const hourlyRate = matched
+      ? Number(matched.price)
+      : finalRules.length > 0
+        ? Number(finalRules[finalRules.length - 1].price)
+        : 200000;
+    const sH = String(Math.floor(cur / 60)).padStart(2, '0');
+    const sM = String(cur % 60).padStart(2, '0');
+    const eH = String(Math.floor((cur + 30) / 60)).padStart(2, '0');
+    const eM = String((cur + 30) % 60).padStart(2, '0');
+    slotBreakdown.push({
+      slot: `${sH}:${sM} - ${eH}:${eM}`,
+      hourlyRate,
+      slotPrice: Math.round(hourlyRate * 0.5),
+      isPeak: cur >= 16 * 60 && cur < 21 * 60,
+    });
+  }
+
+  const courtStatusUpper = (availability.status || 'ACTIVE').toUpperCase();
+
   return {
     courtId,
     courtName: availability.courtName,
+    facilityId: availability.facilityId,
     facilityName: availability.facilityName,
     sportName: availability.sportName,
     bookingDate,
@@ -501,14 +542,137 @@ export async function calculateBookingQuote(data = {}) {
     isHoliday,
     totalPrice,
     depositSuggested,
-    isAvailable: !conflictBooking && !conflictMaint && availability.status === 'ACTIVE',
-    conflictReason: conflictBooking
-      ? `Trùng lịch đã đặt (${conflictBooking.startTime} - ${conflictBooking.endTime})`
-      : conflictMaint
-        ? `Sân đang bảo trì (${conflictMaint.startTime} - ${conflictMaint.endTime}: ${conflictMaint.reason})`
-        : availability.status !== 'ACTIVE'
-          ? 'Sân hiện đang tạm ngưng hoạt động'
-          : null,
+    slotBreakdown,
+    courtStatus: courtStatusUpper,
+    isAvailable: !conflictBooking && !conflictMaint && courtStatusUpper === 'ACTIVE',
+    conflictReason:
+      courtStatusUpper === 'MAINTENANCE'
+        ? `Sân "${availability.courtName}" hiện đang trong trạng thái Bảo trì (chặn đặt sân)`
+        : courtStatusUpper !== 'ACTIVE'
+          ? `Sân "${availability.courtName}" hiện đang tạm ngưng hoạt động`
+          : conflictBooking
+            ? `Trùng lịch đã đặt (${conflictBooking.startTime} - ${conflictBooking.endTime})`
+            : conflictMaint
+              ? `Sân đang có lịch bảo trì (${conflictMaint.startTime} - ${conflictMaint.endTime}: ${conflictMaint.reason})`
+              : null,
+  };
+}
+
+/**
+ * [4.3 - S3-06] Báo giá tự động cho toàn bộ Giỏ đặt sân (Multi-Slot Booking Cart).
+ * Hỗ trợ chọn nhiều khung giờ hoặc nhiều sân khác nhau, kiểm tra trùng với DB và trùng chéo ngay trong giỏ.
+ */
+export async function calculateCartQuote(data = {}) {
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+  if (rawItems.length === 0) {
+    throw new AppError('Giỏ đặt sân đang trống. Vui lòng chọn ít nhất một khung giờ.', 400);
+  }
+  if (rawItems.length > 15) {
+    throw new AppError('Giỏ đặt sân hỗ trợ tối đa 15 khung giờ trong một lần thanh toán.', 400);
+  }
+
+  const quotedItems = [];
+  for (let i = 0; i < rawItems.length; i++) {
+    const item = rawItems[i];
+    const quote = await calculateBookingQuote(item);
+
+    // Kiểm tra xem có trùng khung giờ với một mục khác đứng trước trong cùng giỏ đặt sân không
+    const intraCartConflict = quotedItems.find(
+      (prev) =>
+        Number(prev.courtId) === Number(quote.courtId) &&
+        prev.bookingDate === quote.bookingDate &&
+        timeToMinutes(prev.startTime) < timeToMinutes(quote.endTime) &&
+        timeToMinutes(prev.endTime) > timeToMinutes(quote.startTime)
+    );
+
+    if (intraCartConflict && quote.isAvailable) {
+      quote.isAvailable = false;
+      quote.conflictReason = `Trùng khung giờ với mục #${intraCartConflict.cartIndex + 1} (${intraCartConflict.startTime} - ${intraCartConflict.endTime}) trong giỏ đặt sân`;
+    }
+
+    quotedItems.push({
+      cartIndex: i,
+      cartItemId: item.cartItemId || `${quote.courtId}-${quote.bookingDate}-${quote.startTime}-${quote.endTime}`,
+      ...quote,
+    });
+  }
+
+  const availableItems = quotedItems.filter((it) => it.isAvailable);
+  const conflictItems = quotedItems.filter((it) => !it.isAvailable);
+  const totalCartPrice = quotedItems.reduce((sum, it) => sum + Number(it.totalPrice || 0), 0);
+  const totalAvailablePrice = availableItems.reduce((sum, it) => sum + Number(it.totalPrice || 0), 0);
+  const totalDurationHours = Number(
+    quotedItems.reduce((sum, it) => sum + Number(it.durationHours || 0), 0).toFixed(2)
+  );
+  const totalDepositSuggested = Math.round(totalCartPrice * 0.3);
+
+  return {
+    totalItems: quotedItems.length,
+    availableCount: availableItems.length,
+    conflictCount: conflictItems.length,
+    allAvailable: conflictItems.length === 0,
+    totalDurationHours,
+    totalCartPrice,
+    totalAvailablePrice,
+    totalDepositSuggested,
+    items: quotedItems,
+  };
+}
+
+/**
+ * [4.3 - S3-06] Đặt sân hàng loạt cho toàn bộ các khung giờ trong Giỏ đặt sân (Multi-Slot Cart Checkout).
+ * Áp dụng Transaction Lock chống đặt trùng (TC02) cho từng khung giờ.
+ */
+export async function checkoutBookingCart(data = {}, actorUser = null) {
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+  if (rawItems.length === 0) {
+    throw new AppError('Giỏ đặt sân đang trống. Vui lòng thêm khung giờ trước khi đặt.', 400);
+  }
+
+  // Bước 1: Kiểm tra báo giá & tính khả dụng toàn giỏ trước khi tạo đơn
+  const cartQuote = await calculateCartQuote({ items: rawItems });
+  if (!cartQuote.allAvailable) {
+    const firstConflict = cartQuote.items.find((it) => !it.isAvailable);
+    throw new AppError(
+      `Không thể hoàn tất giỏ đặt sân: ${firstConflict?.courtName} (${firstConflict?.bookingDate} ${firstConflict?.startTime}-${firstConflict?.endTime}) — ${firstConflict?.conflictReason}`,
+      409
+    );
+  }
+
+  const createdBookings = [];
+  for (const item of cartQuote.items) {
+    const created = await createBooking(
+      {
+        courtId: item.courtId,
+        userId: actorUser?.id,
+        bookingDate: item.bookingDate,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        customerName: data.customerName || actorUser?.fullName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail || actorUser?.email,
+        paymentMethod: data.paymentMethod || null,
+      },
+      actorUser
+    );
+    createdBookings.push({
+      ...created,
+      court_name: item.courtName,
+      facility_name: item.facilityName,
+      sport_name: item.sportName,
+      booking_date: item.bookingDate,
+      start_time: item.startTime,
+      end_time: item.endTime,
+    });
+  }
+
+  const totalPrice = createdBookings.reduce((s, b) => s + Number(b.total_price || 0), 0);
+
+  return {
+    totalBookings: createdBookings.length,
+    totalPrice,
+    firstBookingId: createdBookings[0]?.booking_id || null,
+    bookings: createdBookings,
   };
 }
 
@@ -517,7 +681,7 @@ export async function calculateBookingQuote(data = {}) {
  * kèm chi tiết lịch sử giao dịch (transactions), trạng thái thanh toán và hoàn tiền (S3-10).
  * @param {{ id: number, role: string }} user
  */
-export async function getBookingsByUser(user) {
+export async function getBookingsByUser(user, filters = {}) {
   const pool = await getPool();
   const userRole = (user.role || '').toLowerCase();
 
@@ -541,7 +705,8 @@ export async function getBookingsByUser(user) {
                f.name AS facility_name, f.address AS facility_address, f.phone AS facility_phone,
                COALESCE(cust.full_name, u.full_name, N'Khách vãng lai') AS player_name,
                COALESCE(cust.email, u.email, '') AS player_email,
-               COALESCE(cust.phone, u.phone, '') AS player_phone
+               COALESCE(cust.phone, u.phone, '') AS player_phone,
+               COALESCE(cust.reputation_score, u.reputation_score, 5.0) AS reputation_score
         FROM bookings b
         JOIN courts c ON b.court_id = c.court_id
         LEFT JOIN sports s ON c.sport_id = s.sport_id
@@ -565,7 +730,8 @@ export async function getBookingsByUser(user) {
                f.name AS facility_name, f.address AS facility_address, f.phone AS facility_phone,
                COALESCE(cust.full_name, u.full_name, N'Khách vãng lai') AS player_name,
                COALESCE(cust.email, u.email, '') AS player_email,
-               COALESCE(cust.phone, u.phone, '') AS player_phone
+               COALESCE(cust.phone, u.phone, '') AS player_phone,
+               COALESCE(cust.reputation_score, u.reputation_score, 5.0) AS reputation_score
         FROM bookings b
         JOIN courts c ON b.court_id = c.court_id
         LEFT JOIN sports s ON c.sport_id = s.sport_id
@@ -638,7 +804,7 @@ export async function getBookingsByUser(user) {
     });
   }
 
-  return bookingsRecordset.map((b) => {
+  const mappedList = bookingsRecordset.map((b) => {
     const txs = txMap[b.booking_id] || [];
     const totalPaidTx = txs
       .filter((t) => t.status === 'SUCCESS' && t.transaction_type !== 'REFUND')
@@ -681,6 +847,47 @@ export async function getBookingsByUser(user) {
       transactions: txs,
     };
   });
+
+  // [3.1 - S3-14] Bộ lọc danh sách đơn đặt sân online cho Owner / Staff / Player
+  let filteredList = mappedList;
+  if (filters.status && filters.status !== 'ALL') {
+    const targetSt = String(filters.status).toUpperCase();
+    filteredList = filteredList.filter((b) => (b.status || '').toUpperCase() === targetSt);
+  }
+  if (filters.paymentStatus && filters.paymentStatus !== 'ALL') {
+    const targetPay = String(filters.paymentStatus).toUpperCase();
+    filteredList = filteredList.filter((b) => (b.payment_status || '').toUpperCase() === targetPay);
+  }
+  if (filters.facilityId && filters.facilityId !== 'ALL') {
+    filteredList = filteredList.filter((b) => String(b.facility_id) === String(filters.facilityId));
+  }
+  if (filters.courtId && filters.courtId !== 'ALL') {
+    filteredList = filteredList.filter((b) => String(b.court_id) === String(filters.courtId));
+  }
+  if (filters.sportId && filters.sportId !== 'ALL') {
+    filteredList = filteredList.filter((b) => String(b.sport_id) === String(filters.sportId));
+  }
+  if (filters.startDate) {
+    filteredList = filteredList.filter((b) => b.booking_date >= filters.startDate);
+  }
+  if (filters.endDate) {
+    filteredList = filteredList.filter((b) => b.booking_date <= filters.endDate);
+  }
+  if (filters.keyword && String(filters.keyword).trim() !== '') {
+    const kw = String(filters.keyword).trim().toLowerCase();
+    filteredList = filteredList.filter(
+      (b) =>
+        String(b.booking_id).includes(kw) ||
+        `#spl-${b.booking_id}`.includes(kw) ||
+        (b.player_name || '').toLowerCase().includes(kw) ||
+        (b.player_phone || '').toLowerCase().includes(kw) ||
+        (b.player_email || '').toLowerCase().includes(kw) ||
+        (b.court_name || '').toLowerCase().includes(kw) ||
+        (b.facility_name || '').toLowerCase().includes(kw)
+    );
+  }
+
+  return filteredList;
 }
 
 /**
@@ -2249,17 +2456,21 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
 
   const updatedBooking = await getBookingById(cleanId);
 
-  // Thông báo cho người chơi & chủ sân / nhân viên
+  // Thông báo cho người chơi & chủ sân / nhân viên (kèm lý do hủy / từ chối rõ ràng - S3-14)
   if (currentBooking.user_id) {
+    const isRejectedByOwner = cancelReason.startsWith('[Từ chối đơn]');
+    const cleanReasonText = cancelReason.replace(/^\[Từ chối đơn\]\s*/i, '');
     await createNotificationSafe(pool, {
       userId: currentBooking.user_id,
       type: 'BOOKING',
       link: `/bookings?bookingId=${cleanId}`,
-      title: `Đã hủy đơn đặt sân #SPL-${cleanId}`,
+      title: isRejectedByOwner
+        ? `❌ Đơn đặt sân #SPL-${cleanId} đã bị từ chối`
+        : `Đã hủy đơn đặt sân #SPL-${cleanId}`,
       content:
         refundAmount > 0
-          ? `Đơn đặt sân "${currentBooking.court_name}" đã được hủy. Hệ thống đã hoàn trả ${refundAmount.toLocaleString('vi-VN')}đ (${Math.round(refundRate * 100)}%) về phương thức ${refundMethod}.`
-          : `Đơn đặt sân "${currentBooking.court_name}" (${currentBooking.booking_date} ${currentBooking.start_time}-${currentBooking.end_time}) đã được hủy thành công.`,
+          ? `${isRejectedByOwner ? `Đơn đặt sân "${currentBooking.court_name}" đã bị từ chối. Lý do: ${cleanReasonText}.` : `Đơn đặt sân "${currentBooking.court_name}" đã được hủy (Lý do: ${cleanReasonText}).`} Hệ thống đã hoàn trả ${refundAmount.toLocaleString('vi-VN')}đ (${Math.round(refundRate * 100)}%) về phương thức ${refundMethod}.`
+          : `${isRejectedByOwner ? `Đơn đặt sân "${currentBooking.court_name}" (${currentBooking.booking_date} ${currentBooking.start_time}-${currentBooking.end_time}) đã bị từ chối. Lý do: ${cleanReasonText}.` : `Đơn đặt sân "${currentBooking.court_name}" (${currentBooking.booking_date} ${currentBooking.start_time}-${currentBooking.end_time}) đã được hủy. Lý do: ${cleanReasonText}.`}`,
     });
   }
 
@@ -2288,6 +2499,31 @@ export async function cancelBookingWithRefund(bookingId, data = {}, actorUser = 
       refundTransaction,
     },
   };
+}
+
+/**
+ * [3.1 - S3-14] Chủ sân hoặc Nhân viên từ chối đơn đặt sân online của Người chơi (bắt buộc kèm lý do).
+ * Tự động giải phóng sân, hoàn tiền 100% nếu khách đã thanh toán/cọc và gửi thông báo kèm lý do cho Người chơi.
+ */
+export async function rejectOnlineBooking(bookingId, data = {}, actorUser = null) {
+  const actorRole = (actorUser?.role || '').toLowerCase();
+  if (!['owner', 'staff', 'admin'].includes(actorRole)) {
+    throw new AppError('Chỉ Chủ sân hoặc Nhân viên mới có quyền từ chối đơn đặt sân.', 403);
+  }
+
+  const reason = (data.reason || data.rejectReason || data.cancelReason || '').trim();
+  if (!reason) {
+    throw new AppError('Vui lòng nhập lý do từ chối đơn đặt sân để thông báo cho Người chơi.', 400);
+  }
+
+  return cancelBookingWithRefund(
+    bookingId,
+    {
+      ...data,
+      cancelReason: `[Từ chối đơn] ${reason}`,
+    },
+    actorUser
+  );
 }
 
 /**
@@ -2476,24 +2712,29 @@ export async function updateBooking(bookingId, data, actorUser = null) {
     }
   }
 
-  // Gửi thông báo cho người chơi khi trạng thái đơn đặt sân thay đổi
+  // [3.1 - S3-14] Gửi thông báo tự động cho Người chơi khi Chủ sân / Staff xác nhận hoặc cập nhật đơn
   if (updated.user_id && cleanStatus !== currentStatus) {
+    const detailed = await getBookingById(bookingId);
+    const courtLabel = detailed?.court_name || `Sân #${updated.court_id}`;
+    const dateLabel = formatDateStr(updated.booking_date);
+    const timeLabel = `${formatTimeStr(updated.start_time)} - ${formatTimeStr(updated.end_time)}`;
+
     const statusMessages = {
       CONFIRMED: {
-        title: `Đơn #SPL-${bookingId} đã được xác nhận`,
-        content: 'Chủ sân đã xác nhận lịch đặt sân của bạn. Hãy đến đúng giờ để check-in nhé!',
+        title: `✅ Đơn đặt sân #SPL-${bookingId} đã được xác nhận`,
+        content: `Chủ sân đã xác nhận lịch đặt sân "${courtLabel}" ngày ${dateLabel} (${timeLabel}). Hãy đến đúng giờ để check-in nhé!`,
       },
       'CHECKED-IN': {
-        title: `Check-in thành công đơn #SPL-${bookingId}`,
-        content: 'Bạn đã check-in nhận sân thành công. Chúc bạn có trận đấu tuyệt vời!',
+        title: `🏃 Check-in thành công đơn #SPL-${bookingId}`,
+        content: `Bạn đã check-in nhận sân "${courtLabel}" (${dateLabel} ${timeLabel}). Chúc bạn có trận đấu tuyệt vời!`,
       },
       COMPLETED: {
-        title: `Hoàn tất đơn đặt sân #SPL-${bookingId}`,
-        content: 'Đơn đặt sân của bạn đã hoàn tất. Cảm ơn bạn đã sử dụng SportLink!',
+        title: `🏆 Hoàn tất đơn đặt sân #SPL-${bookingId}`,
+        content: `Đơn đặt sân "${courtLabel}" ngày ${dateLabel} đã hoàn tất và tất toán đầy đủ. Cảm ơn bạn đã sử dụng SportLink!`,
       },
       'NO-SHOW': {
-        title: `Đơn #SPL-${bookingId} bị đánh dấu vắng mặt`,
-        content: 'Bạn đã không đến nhận sân theo lịch đặt (No-show). Điểm uy tín bị trừ 0.5 điểm.',
+        title: `⚠️ Ghi nhận vắng mặt (No-show) đơn #SPL-${bookingId}`,
+        content: `Đơn đặt sân "${courtLabel}" ngày ${dateLabel} (${timeLabel}) được ghi nhận không đến nhận sân (No-show). Điểm uy tín bị trừ 0.5★.`,
       },
     };
     const msg = statusMessages[cleanStatus];

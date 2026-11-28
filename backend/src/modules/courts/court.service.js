@@ -19,7 +19,7 @@ export async function getAllCourts(filters = {}) {
     FROM courts c
     LEFT JOIN facilities f ON c.facility_id = f.facility_id
     LEFT JOIN sports s ON c.sport_id = s.sport_id
-    WHERE c.status = 'ACTIVE'
+    WHERE c.status IN ('ACTIVE', 'MAINTENANCE')
       AND (f.status = 'ACTIVE' OR c.facility_id IS NULL)
   `;
 
